@@ -30,8 +30,9 @@
   #pause-toggle{
     position:fixed; top:24px; left:28px; z-index:20;
     background:var(--panel); color:var(--text); border:1px solid var(--wire);
-    font-family:'IBM Plex Mono', ui-monospace, monospace; font-size:11px;
-    padding:6px 10px; border-radius:4px; cursor:pointer;
+    font-size:13px; line-height:1;
+    width:26px; height:26px; padding:0; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
     transform:translateY(-60px); opacity:0; transition:transform .15s, opacity .15s;
   }
   #pause-toggle:focus-visible{
@@ -55,7 +56,7 @@
   .mark span{color:var(--amber);}
   .thesis{
     font-family:'Space Grotesk',system-ui,sans-serif;
-    font-size:22px; font-weight:500; margin-top:6px; max-width:420px;
+    font-size:16px; font-weight:500; margin-top:6px; max-width:420px;
     line-height:1.35; color:var(--text);
   }
   .thesis em{color:var(--sage); font-style:normal;}
@@ -85,7 +86,7 @@
   #legend .caption{color:var(--muted); opacity:0.75; font-size:10px; margin-top:6px; max-width:220px;}
 
   @media (max-width: 640px){
-    .thesis{font-size:17px; max-width:70vw;}
+    .thesis{font-size:13px; max-width:70vw;}
     #ticker{font-size:11px;}
     #legend{display:none;}
   }
@@ -95,7 +96,7 @@
 
 <div id="canvas-wrap" aria-hidden="true"></div>
 
-<button id="pause-toggle" type="button" aria-pressed="false">pause animation</button>
+<button id="pause-toggle" type="button" aria-pressed="false" aria-label="pause animation">&#10073;&#10073;</button>
 
 <header>
   <div class="mark">mad<span>mcp</span></div>
@@ -528,11 +529,12 @@ window.addEventListener('resize', () => {
 // outright (Enter/Space activate a <button> natively -- no extra key handling
 // needed), independent of the OS-level media-query preference.
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-let paused = reducedMotion; // start paused if the OS asks for reduced motion
+let paused = false; // always start playing, regardless of reduced-motion preference
 const pauseBtn = document.getElementById('pause-toggle');
 function setPaused(next) {
   paused = next;
-  pauseBtn.textContent = paused ? 'play animation' : 'pause animation';
+  pauseBtn.innerHTML = paused ? '&#9654;' : '&#10073;&#10073;';
+  pauseBtn.setAttribute('aria-label', paused ? 'play animation' : 'pause animation');
   pauseBtn.setAttribute('aria-pressed', String(paused));
 }
 setPaused(paused);
