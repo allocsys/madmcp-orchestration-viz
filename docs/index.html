@@ -209,6 +209,72 @@ let starField;
   scene.add(starField);
 })();
 
+// ---- nebula / depth clouds: large soft color-wash billboards sitting far
+// behind the starfield, so the void has atmosphere and color depth instead
+// of reading as flat black. Each cloud is an irregular multi-blob canvas
+// texture (not a single clean radial gradient) so edges feel organic/gaseous
+// rather than like a glowing disc. Kept very low-opacity and additive so
+// they read as faint color drift, never competing with the graph itself. ----
+let nebulaField;
+const rotatingNebulae = []; // { mesh, axis, speed } -- independent slow drift, parallax vs starfield
+(function addNebulaClouds(){
+  function makeNebulaTexture(hex) {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.globalCompositeOperation = 'lighter';
+    // 4-6 overlapping soft blobs, offset from center, to build an irregular
+    // cloud silhouette instead of a perfect circle
+    const blobCount = 5;
+    for (let i = 0; i < blobCount; i++) {
+      const cx = size/2 + (Math.random() - 0.5) * size * 0.5;
+      const cy = size/2 + (Math.random() - 0.5) * size * 0.5;
+      const r = size * (0.28 + Math.random() * 0.22);
+      const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      grd.addColorStop(0, hex + '55');
+      grd.addColorStop(0.5, hex + '22');
+      grd.addColorStop(1, hex + '00');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    return tex;
+  }
+
+  nebulaField = new THREE.Group();
+  const palette = [COLORS.wire, COLORS.amber, COLORS.sage, COLORS.wire];
+  const CLOUD_COUNT = 7;
+  for (let i = 0; i < CLOUD_COUNT; i++) {
+    const color = palette[i % palette.length];
+    const hex = '#' + color.toString(16).padStart(6, '0');
+    const tex = makeNebulaTexture(hex);
+    const mat = new THREE.SpriteMaterial({
+      map: tex, transparent: true, opacity: 0.35 + Math.random() * 0.2,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const sprite = new THREE.Sprite(mat);
+
+    // scatter far behind the graph/starfield shell, biased toward the back
+    // (negative z-ish / wide radius) so they read as backdrop, not foreground haze
+    const r = 55 + Math.random() * 55;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos((Math.random() * 1.6) - 0.8); // bias away from straight up/down
+    sprite.position.set(
+      r * Math.sin(phi) * Math.cos(theta),
+      r * Math.cos(phi) * 0.6, // flatten vertically so clouds don't crowd the agent/repo extremes
+      r * Math.sin(phi) * Math.sin(theta)
+    );
+    const scale = 38 + Math.random() * 34;
+    sprite.scale.set(scale, scale, 1);
+    nebulaField.add(sprite);
+  }
+  scene.add(nebulaField);
+})();
+
 // ---- label sprite helper (canvas texture) ----
 function makeLabel(text, opts = {}) {
   const {
@@ -892,8 +958,20 @@ const sequence = [
       { from: 'delegate-gemini', to: 'shared-types' },
       { from: 'delegate-gemini', to: 'github' },
       { from: 'delegate-gemini', to: 'notion' },
+      { from: 'delegate-gemini', to: 'cloudflare' },
+      { from: 'delegate-gemini', to: 'mem0' },
     ], kind: 'fanout',
-    msg: '<span class="fn">delegate_gemini</span> fans out to 5 targets in parallel' },
+    msg: '<span class="fn">delegate_gemini</span> fans out to 7 targets in parallel' },
+  { pulses: [
+      { from: 'api-service', to: 'delegate-gemini' },
+      { from: 'worker-queue', to: 'delegate-gemini' },
+      { from: 'shared-types', to: 'delegate-gemini' },
+      { from: 'github', to: 'delegate-gemini' },
+      { from: 'notion', to: 'delegate-gemini' },
+      { from: 'cloudflare', to: 'delegate-gemini' },
+      { from: 'mem0', to: 'delegate-gemini' },
+    ], kind: 'return',
+    msg: '7 targets -&gt; <span class="fn">delegate_gemini</span>: results returned' },
   { pulses: [{ from: 'delegate-gemini', to: 'core' }], kind: 'return',
     msg: '<span class="fn">delegate_gemini</span> -&gt; core: consolidated result' },
   { pulses: [{ from: 'core', to: 'agent' }], kind: 'return',
@@ -1029,6 +1107,8 @@ function animate(now) {
   // the scripted orchestration sequence
   rotatingShells.forEach(s => { s.mesh.rotation[s.axis] += s.speed * deltaMs; });
   if (starField && !reducedMotion) starField.rotation.y += 0.00003 * deltaMs;
+  // nebula drifts slower than the starfield for a subtle parallax depth cue
+  if (nebulaField && !reducedMotion) nebulaField.rotation.y -= 0.000012 * deltaMs;
 
   updateBreathing(now);
 
