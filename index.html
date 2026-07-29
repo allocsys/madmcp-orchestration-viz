@@ -89,7 +89,6 @@
 <div id="ticker">
   <div class="line">&gt; system ready — <span class="fn">madmcp</span> core online</div>
   <div class="line">&gt; direct calls: github · notion · cloudflare · mem0</div>
-  <div class="line">&gt; delegation: <span class="fn">delegate_gemini</span> — hands off, doesn't just call</div>
   <div class="line active">&gt; awaiting orchestration sequence…</div>
 </div>
 
@@ -285,7 +284,7 @@ function addDelegateNode(id, pos, label, sublabel) {
   group.add(lbl);
 
   if (sublabel) {
-    const sub = makeLabel(sublabel, { mono: true, size: 24, color:'#7C8798' });
+    const sub = makeLabel(sublabel, { mono: true, size: 26, color:'#7C8798' });
     sub.position.set(0, -1.5, 0);
     group.add(sub);
   }
