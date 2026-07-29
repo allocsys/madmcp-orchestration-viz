@@ -507,6 +507,29 @@ graph.repos.forEach(r => nodePositions[r.id] = r.pos);
 // then is retired. Independent of the static wire/connector meshes above --
 // those just show the topology; pulses show traffic moving through it.
 const activePulses = [];
+
+// cached horizontal-gradient textures for comet trails, keyed by hex color --
+// transparent tail -> solid head, reused across every pulse of that color
+const trailTextureCache = new Map();
+function getTrailTexture(color) {
+  if (trailTextureCache.has(color)) return trailTextureCache.get(color);
+  const w = 128, h = 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const hex = '#' + color.toString(16).padStart(6, '0');
+  const grd = ctx.createLinearGradient(0, 0, w, 0);
+  grd.addColorStop(0, hex + '00');
+  grd.addColorStop(0.7, hex + '55');
+  grd.addColorStop(1, hex + 'ff');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, w, h);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  trailTextureCache.set(color, tex);
+  return tex;
+}
+
 function spawnPulse(fromId, toId, color, duration = 900) {
   const from = nodePositions[fromId], to = nodePositions[toId];
   if (!from || !to) return;
@@ -515,10 +538,28 @@ function spawnPulse(fromId, toId, color, duration = 900) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(...from);
   nodeGroup.add(mesh);
+
+  // trailing comet streak behind the head, oriented along the travel direction --
+  // sells "data moving through a wire" instead of a ball teleport-lerping through space
+  const fromV = new THREE.Vector3(...from), toV = new THREE.Vector3(...to);
+  const dir = new THREE.Vector3().subVectors(toV, fromV);
+  const segLen = dir.length() || 1;
+  dir.normalize();
+  const trailLen = Math.min(Math.max(segLen * 0.22, 1.0), 3.2);
+  const trailGeo = new THREE.PlaneGeometry(1, 0.34);
+  const trailMat = new THREE.MeshBasicMaterial({
+    map: getTrailTexture(color), color, transparent: true, opacity: 0.9,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const trailMesh = new THREE.Mesh(trailGeo, trailMat);
+  trailMesh.scale.set(trailLen, 1, 1);
+  trailMesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+  nodeGroup.add(trailMesh);
+
   activePulses.push({
-    mesh,
-    from: new THREE.Vector3(...from),
-    to: new THREE.Vector3(...to),
+    mesh, trailMesh, dir, trailLen,
+    from: fromV,
+    to: toV,
     t: 0,
     duration,
   });
@@ -531,11 +572,24 @@ function updatePulses(deltaMs) {
     const frac = Math.min(p.t / p.duration, 1);
     const eased = frac < 0.5 ? 2 * frac * frac : -1 + (4 - 2 * frac) * frac; // easeInOutQuad
     p.mesh.position.lerpVectors(p.from, p.to, eased);
-    p.mesh.material.opacity = frac > 0.85 ? Math.max(0, 1 - (frac - 0.85) / 0.15) : 1;
+    const fadeOpacity = frac > 0.85 ? Math.max(0, 1 - (frac - 0.85) / 0.15) : 1;
+    p.mesh.material.opacity = fadeOpacity;
+
+    // trail grows in over the first ~12% of travel so it doesn't pop to full
+    // length instantly, then tracks the head and fades out together with it
+    const growIn = Math.min(frac / 0.12, 1);
+    const curLen = p.trailLen * growIn;
+    p.trailMesh.scale.set(curLen, 1, 1);
+    p.trailMesh.position.copy(p.mesh.position).addScaledVector(p.dir, -curLen / 2);
+    p.trailMesh.material.opacity = 0.9 * fadeOpacity * growIn;
+
     if (frac >= 1) {
       nodeGroup.remove(p.mesh);
       p.mesh.geometry.dispose();
       p.mesh.material.dispose();
+      nodeGroup.remove(p.trailMesh);
+      p.trailMesh.geometry.dispose();
+      p.trailMesh.material.dispose();
       activePulses.splice(i, 1);
     }
   }
