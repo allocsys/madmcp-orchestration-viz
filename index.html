@@ -158,7 +158,7 @@ function makeLabel(text, opts = {}) {
 //                                                   that does its own multi-hop work)
 const graph = {
   agent: { pos: [0, 9, 0], label: 'agent', color: COLORS.text, r: 0.55 },
-  core:  { pos: [0, 0, 0], label: 'madmcp', color: COLORS.amber, r: 1.0 },
+  core:  { pos: [0, 4, 0], label: 'madmcp', color: COLORS.amber, r: 1.0 },
   services: [
     { id:'github',    pos:[-9, -1,  4], label:'github',     tool:'create_repo · get_pull_requests · search_code' },
     { id:'notion',     pos:[ 9, -1,  4], label:'notion',     tool:'notion_search · notion_query_database' },
@@ -167,13 +167,15 @@ const graph = {
   ],
   // delegation: core hands the WHOLE task to this sub-agent, which independently
   // fans out to multiple repos and reports back one consolidated result.
+  // Pulled in to sit centered and mid-range from core -- same rough distance as
+  // the direct-call services, not off in a far corner.
   delegates: [
-    { id:'delegate-gemini', pos:[-6, -6, 11], label:'delegate_gemini', tool:'autonomous multi-repo investigation' },
+    { id:'delegate-gemini', pos:[-5, -3, 7], label:'delegate_gemini', tool:'autonomous multi-repo investigation' },
   ],
   repos: [
-    { id:'api-service',    pos:[-15,  2,  9], label:'api-service' },
-    { id:'worker-queue',   pos:[-16, -4,  5], label:'worker-queue' },
-    { id:'shared-types',   pos:[-13, -5, 11], label:'shared-types' },
+    { id:'api-service',    pos:[-14,  5,  5], label:'api-service' },
+    { id:'worker-queue',   pos:[-15, -1,  1], label:'worker-queue' },
+    { id:'shared-types',   pos:[-12, -2,  7], label:'shared-types' },
   ]
 };
 
