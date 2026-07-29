@@ -116,6 +116,15 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- postprocessing addons — must match the r128 core build above; these are
+     the legacy examples/js (non-module) builds so they attach to global THREE,
+     same pattern as the core script tag -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
 <script>
 /* ---------------------------------------------------------
    madmcp orchestration viz — STEP 3: orchestration animation
@@ -147,6 +156,22 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(COLORS.base, 1);
 wrap.appendChild(renderer.domElement);
+
+// ---- postprocessing: real bloom, replacing the additive-sprite stand-in's
+// job of selling "glow" -- this one actually blooms the brightest pixels
+// (pulse heads, flash peaks, shimmer bands) instead of faking it with a
+// fixed-size gradient billboard. Threshold kept low-ish and strength modest
+// since the sprites are still in the scene too; tuned so bloom reads as a
+// soft bright-point halo rather than blowing out the whole graph.
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene, camera));
+const bloomPass = new THREE.UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.55,  // strength
+  0.4,   // radius
+  0.18   // luminance threshold
+);
+composer.addPass(bloomPass);
 
 // ---- lighting: minimal, since nodes are emissive-ish ----
 scene.add(new THREE.AmbientLight(0x3a4658, 1.1));
@@ -346,10 +371,42 @@ function addWire(a, b, color = COLORS.wire, opacity = 0.5) {
   return line;
 }
 
+// vertical soft-band texture for connector shimmer: transparent top and
+// bottom, bright in the middle. Sampled via texture.offset.y so the band's
+// screen position tracks a traveling pulse's progress along the cylinder.
+// Defined here (ahead of addConnector, which calls it during graph
+// construction) rather than down near the pulse code -- it used to live
+// there as a `const`, which put it in the temporal dead zone by the time
+// the early agent/core connectors were actually built.
+const shimmerTextureCache = new Map();
+function getShimmerTexture(color) {
+  if (shimmerTextureCache.has(color)) return shimmerTextureCache.get(color);
+  const w = 16, h = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const hex = '#' + color.toString(16).padStart(6, '0');
+  const grd = ctx.createLinearGradient(0, 0, 0, h);
+  grd.addColorStop(0, hex + '00');
+  grd.addColorStop(0.42, hex + '00');
+  grd.addColorStop(0.5, hex + 'ff');
+  grd.addColorStop(0.58, hex + '00');
+  grd.addColorStop(1, hex + '00');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, w, h);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  shimmerTextureCache.set(color, tex);
+  return tex;
+}
+
 // solid connector mesh — a thin THREE.Line is only ever ~1px in WebGL and
 // disappears against a busy scene. Use an actual cylinder for edges that must
 // read unambiguously as "these two nodes are connected."
-function addConnector(a, b, radius, color, opacity = 0.85) {
+// aId/bId (optional) register this connector so traveling pulses can look it
+// up and drive a shimmer overlay along its length -- see registerConnectorEdge.
+function addConnector(a, b, radius, color, opacity = 0.85, aId, bId) {
   const start = new THREE.Vector3(...a), end = new THREE.Vector3(...b);
   const dir = new THREE.Vector3().subVectors(end, start);
   const length = dir.length();
@@ -360,7 +417,37 @@ function addConnector(a, b, radius, color, opacity = 0.85) {
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
   nodeGroup.add(mesh);
   lines.push(mesh);
+
+  // shimmer overlay: a slightly-fatter additive cylinder sharing the same
+  // transform, textured with a soft bright band. Idle opacity 0 -- only lit
+  // up while a pulse is actively traveling this edge (see spawnPulse/updatePulses).
+  // CylinderGeometry's side UVs run v=0 at local -Y to v=1 at local +Y, and
+  // local +Y is what we aim at `dir` (start->end) above, so texture v=0 lines
+  // up with `a` and v=1 with `b` -- matches a pulse's frac 0->1 directly.
+  const shimmerGeo = new THREE.CylinderGeometry(radius * 2.2, radius * 2.2, length, 8, 1, true);
+  const shimmerTex = getShimmerTexture(color);
+  const shimmerMat = new THREE.MeshBasicMaterial({
+    map: shimmerTex, color: 0xffffff, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const shimmerMesh = new THREE.Mesh(shimmerGeo, shimmerMat);
+  shimmerMesh.position.copy(mesh.position);
+  shimmerMesh.quaternion.copy(mesh.quaternion);
+  nodeGroup.add(shimmerMesh);
+  mesh.userData.shimmerMesh = shimmerMesh;
+
+  if (aId && bId) registerConnectorEdge(aId, bId, shimmerMesh);
   return mesh;
+}
+
+// looked up by spawnPulse so a pulse traveling a registered edge can drive
+// that connector's shimmer overlay. Registered under both directions since
+// return traffic (e.g. delegate-gemini -> core) reuses the same physical
+// connector built as core -> delegate-gemini.
+const connectorRegistry = {};
+function registerConnectorEdge(aId, bId, mesh) {
+  connectorRegistry[`${aId}|${bId}`] = { mesh, forward: true };
+  connectorRegistry[`${bId}|${aId}`] = { mesh, forward: false };
 }
 
 // delegate/sub-agent node: octahedron core + a wireframe ring, distinct from the
@@ -510,10 +597,11 @@ addNode('agent', graph.agent.pos, graph.agent.r, graph.agent.color, 'agent');
 addNode('core', graph.core.pos, graph.core.r, graph.core.color, 'madmcp');
 registerNodeEntrance('agent', ENTRANCE_PHASE.agent);
 registerNodeEntrance('core', ENTRANCE_PHASE.core);
-const agentCoreWire = addWire(graph.agent.pos, graph.core.pos, COLORS.wire, 0.6);
+const agentCoreWire = addConnector(graph.agent.pos, graph.core.pos, 0.045, COLORS.wire, 0.6, 'agent', 'core');
 registerWireEntrance(agentCoreWire, 0.6, ENTRANCE_PHASE.core + 150);
 
-// core -> services (DIRECT CALL — thin solid wire, one hop)
+// core -> services (DIRECT CALL — thin solid connector, one hop; upgraded from
+// a plain addWire Line so these edges can shimmer in sync with pulses too)
 graph.services.forEach((s, i) => {
   if (s.id === 'github') {
     addGithubNode(s.id, s.pos, s.label, s.tool);
@@ -522,7 +610,7 @@ graph.services.forEach((s, i) => {
   }
   const delay = ENTRANCE_PHASE.services + i * ENTRANCE_STAGGER;
   registerNodeEntrance(s.id, delay);
-  const w = addWire(graph.core.pos, s.pos, COLORS.wire, 0.45);
+  const w = addConnector(graph.core.pos, s.pos, 0.035, COLORS.wire, 0.45, 'core', s.id);
   registerWireEntrance(w, 0.45, delay + 130);
 });
 
@@ -531,7 +619,7 @@ graph.services.forEach((s, i) => {
 graph.delegates.forEach(d => {
   addDelegateNode(d.id, d.pos, d.label, d.tool);
   registerNodeEntrance(d.id, ENTRANCE_PHASE.delegate);
-  const c = addConnector(graph.core.pos, d.pos, 0.05, COLORS.amber, 0.85);
+  const c = addConnector(graph.core.pos, d.pos, 0.05, COLORS.amber, 0.85, 'core', d.id);
   registerWireEntrance(c, 0.85, ENTRANCE_PHASE.delegate + 130);
 });
 
@@ -541,14 +629,14 @@ graph.repos.forEach((r, i) => {
   addNode(r.id, r.pos, 0.32, 0x8CA3BD, r.label);
   const delay = ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER;
   registerNodeEntrance(r.id, delay);
-  const c = addConnector(delegateGemini.pos, r.pos, 0.03, COLORS.amber, 0.55);
+  const c = addConnector(delegateGemini.pos, r.pos, 0.03, COLORS.amber, 0.55, delegateGemini.id, r.id);
   registerWireEntrance(c, 0.55, delay + 130);
 });
 
 // delegate-gemini -> services too -- it isn't limited to repos, it can read
 // across any connected module (github, notion, cloudflare, mem0) once dispatched
 graph.services.forEach((s, i) => {
-  const c = addConnector(delegateGemini.pos, s.pos, 0.025, COLORS.amber, 0.4);
+  const c = addConnector(delegateGemini.pos, s.pos, 0.025, COLORS.amber, 0.4, delegateGemini.id, s.id);
   registerWireEntrance(c, 0.4, ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER + 200);
 });
 
@@ -612,6 +700,10 @@ function spawnPulse(fromId, toId, color, duration = 900) {
   trailMesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
   nodeGroup.add(trailMesh);
 
+  // if this edge has a registered cylinder connector, grab its shimmer overlay
+  // so updatePulses can brighten a traveling band in sync with this pulse
+  const edge = connectorRegistry[`${fromId}|${toId}`];
+
   activePulses.push({
     mesh, trailMesh, dir, trailLen,
     from: fromV,
@@ -619,6 +711,8 @@ function spawnPulse(fromId, toId, color, duration = 900) {
     toId,
     t: 0,
     duration,
+    shimmerMesh: edge ? edge.mesh : null,
+    shimmerForward: edge ? edge.forward : true,
   });
 }
 
@@ -640,6 +734,22 @@ function updatePulses(deltaMs) {
     p.trailMesh.position.copy(p.mesh.position).addScaledVector(p.dir, -curLen / 2);
     p.trailMesh.material.opacity = 0.9 * fadeOpacity * growIn;
 
+    // wire shimmer: brighten a band on the connector cylinder at the same
+    // point the pulse head currently occupies, so the wire itself looks lit
+    // up as traffic passes through it rather than just the traveling orb.
+    // shimmerForward=false means this pulse runs opposite the connector's own
+    // a->b direction (e.g. a delegate-gemini->core return on a core->delegate
+    // connector), so the texture offset is mirrored to track correctly.
+    if (p.shimmerMesh) {
+      const v = p.shimmerForward ? eased : 1 - eased;
+      // texture is sampled at (uv + offset), and the bright band sits at
+      // texture-v=0.5, so to land that band at geometry position `v` we need
+      // offset.y = 0.5 - v (not v - 0.5, which places the band at the
+      // *complement* of the pulse's position and makes it run backward).
+      p.shimmerMesh.material.map.offset.y = 0.5 - v;
+      p.shimmerMesh.material.opacity = 0.85 * fadeOpacity * growIn;
+    }
+
     if (frac >= 1) {
       flashNode(p.toId);
       nodeGroup.remove(p.mesh);
@@ -648,6 +758,7 @@ function updatePulses(deltaMs) {
       nodeGroup.remove(p.trailMesh);
       p.trailMesh.geometry.dispose();
       p.trailMesh.material.dispose();
+      if (p.shimmerMesh) p.shimmerMesh.material.opacity = 0;
       activePulses.splice(i, 1);
     }
   }
@@ -876,6 +987,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
 });
 
 // ---- accessibility: reduced motion + keyboard pause control ----
@@ -929,7 +1041,7 @@ function animate(now) {
   // while paused since flashT only advances below when !paused.
   updateFlashes(paused ? 0 : deltaMs);
 
-  renderer.render(scene, camera);
+  composer.render();
 }
 requestAnimationFrame(animate);
 </script>
