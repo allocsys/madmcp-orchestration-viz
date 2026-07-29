@@ -28,7 +28,7 @@
      until focused so it doesn't clutter the visual, but fully reachable
      via Tab and clearly visible once it has focus. */
   #pause-toggle{
-    position:fixed; top:24px; left:28px; z-index:20;
+    position:fixed; top:24px; right:28px; z-index:20;
     background:var(--panel); color:var(--text); border:1px solid var(--wire);
     font-size:13px; line-height:1;
     width:26px; height:26px; padding:0; border-radius:50%;
@@ -41,7 +41,7 @@
   }
 
   @media (prefers-reduced-motion: reduce){
-    #pause-toggle{ transform:translateY(0); opacity:1; position:fixed; top:24px; left:28px; }
+    #pause-toggle{ transform:translateY(0); opacity:1; position:fixed; top:24px; right:28px; }
   }
 
   header{
