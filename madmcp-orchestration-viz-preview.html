@@ -153,6 +153,36 @@ scene.add(new THREE.AmbientLight(0x3a4658, 1.1));
 const key = new THREE.PointLight(0xffffff, 0.6, 100);
 key.position.set(10, 15, 20);
 scene.add(key);
+// low rim light from below/behind so the faceted crystal nodes catch an edge
+// highlight on their far side, not just a flat front-lit blob
+const rim = new THREE.PointLight(0x4A6B8A, 0.5, 120);
+rim.position.set(-14, -10, -18);
+scene.add(rim);
+
+// ---- ambient starfield: faint depth cues around the graph, so the scene
+// reads as a live orbit/telemetry display rather than a flat void ----
+let starField;
+(function addStarfield(){
+  const COUNT = 900;
+  const positions = new Float32Array(COUNT * 3);
+  for (let i = 0; i < COUNT; i++) {
+    // scatter in a shell so stars sit behind the graph, not inside it
+    const r = 30 + Math.random() * 46;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos((Math.random() * 2) - 1);
+    positions[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3+1] = r * Math.cos(phi);
+    positions[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    color: 0x7C8798, size: 0.11, sizeAttenuation: true,
+    transparent: true, opacity: 0.5, depthWrite: false,
+  });
+  starField = new THREE.Points(geo, mat);
+  scene.add(starField);
+})();
 
 // ---- label sprite helper (canvas texture) ----
 function makeLabel(text, opts = {}) {
@@ -182,6 +212,33 @@ function makeLabel(text, opts = {}) {
   const sprite = new THREE.Sprite(mat);
   const scale = 0.011;
   sprite.scale.set(canvas.width*scale, canvas.height*scale, 1);
+  return sprite;
+}
+
+// soft additive radial-gradient sprite behind a node -- a cheap stand-in for
+// a real bloom pass. Reused for every node so light nodes look like they're
+// actually emitting, not just flat-colored geometry.
+function makeGlowSprite(color, scale = 3.2, opacity = 0.5) {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const hex = '#' + color.toString(16).padStart(6, '0');
+  const grd = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  grd.addColorStop(0, hex + 'ff');
+  grd.addColorStop(0.35, hex + '77');
+  grd.addColorStop(1, hex + '00');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({
+    map: tex, transparent: true, opacity, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(scale, scale, 1);
+  sprite.userData.baseOpacity = opacity;
+  sprite.userData.baseScale = scale;
   return sprite;
 }
 
@@ -219,29 +276,52 @@ scene.add(nodeGroup);
 
 const nodeMeshes = {}; // id -> mesh, for step 3 pulse targeting
 const lines = [];
+const rotatingShells = []; // { mesh, axis, speed } -- containment shells/rings that spin idly
 
+// each node is three parts, not one sphere:
+//  1. a faceted low-poly crystal core (icosahedron, flat-shaded) -- reads as a
+//     cut data-gem rather than a flat colored dot
+//  2. a slightly larger wireframe shell, spinning independently -- reads as a
+//     containment field / live telemetry lattice around the core
+//  3. a soft additive glow sprite behind it -- a cheap stand-in for bloom so
+//     the "active" nodes actually look like they're emitting light
 function addNode(id, pos, radius, color, label, sublabel) {
-  const geo = new THREE.SphereGeometry(radius, 24, 24);
-  const mat = new THREE.MeshStandardMaterial({
-    color, emissive: color, emissiveIntensity: 0.35,
-    roughness: 0.4, metalness: 0.1,
+  const group = new THREE.Group();
+  group.position.set(...pos);
+
+  const coreGeo = new THREE.IcosahedronGeometry(radius, 1);
+  const coreMat = new THREE.MeshPhysicalMaterial({
+    color, emissive: color, emissiveIntensity: 0.32,
+    roughness: 0.35, metalness: 0.25, clearcoat: 0.6, clearcoatRoughness: 0.25,
+    flatShading: true,
   });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(...pos);
-  mesh.userData.baseEmissive = 0.35;
-  nodeGroup.add(mesh);
-  nodeMeshes[id] = mesh;
+  const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+  coreMesh.userData.baseEmissive = 0.32;
+  group.add(coreMesh);
+
+  const shellGeo = new THREE.IcosahedronGeometry(radius * 1.45, 1);
+  const shellMat = new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.22 });
+  const shellMesh = new THREE.Mesh(shellGeo, shellMat);
+  group.add(shellMesh);
+  rotatingShells.push({ mesh: shellMesh, axis: 'y', speed: 0.00004 + Math.random() * 0.00004 });
+
+  const glow = makeGlowSprite(color, radius * 5.2, 0.45);
+  group.add(glow);
+
+  nodeGroup.add(group);
+  nodeMeshes[id] = coreMesh;
+  nodeMeshes[id + '-glow'] = glow;
 
   const lbl = makeLabel(label, { mono: true, size: 40, color:'#E8EDF2' });
-  lbl.position.set(pos[0], pos[1] + radius + 0.9, pos[2]);
-  nodeGroup.add(lbl);
+  lbl.position.set(0, radius + 0.9, 0);
+  group.add(lbl);
 
   if (sublabel) {
     const sub = makeLabel(sublabel, { mono: true, size: 26, color:'#7C8798' });
-    sub.position.set(pos[0], pos[1] - radius - 0.9, pos[2]);
-    nodeGroup.add(sub);
+    sub.position.set(0, -radius - 0.9, 0);
+    group.add(sub);
   }
-  return mesh;
+  return coreMesh;
 }
 
 function addWire(a, b, color = COLORS.wire, opacity = 0.5) {
@@ -280,9 +360,10 @@ function addDelegateNode(id, pos, label, sublabel) {
   group.position.set(...pos);
 
   const coreGeo = new THREE.OctahedronGeometry(0.68, 0);
-  const coreMat = new THREE.MeshStandardMaterial({
+  const coreMat = new THREE.MeshPhysicalMaterial({
     color: COLORS.amber, emissive: COLORS.amber, emissiveIntensity: 0.45,
-    roughness: 0.35, metalness: 0.15, flatShading: true,
+    roughness: 0.3, metalness: 0.2, clearcoat: 0.7, clearcoatRoughness: 0.2,
+    flatShading: true,
   });
   const coreMesh = new THREE.Mesh(coreGeo, coreMat);
   coreMesh.userData.baseEmissive = 0.45;
@@ -293,10 +374,25 @@ function addDelegateNode(id, pos, label, sublabel) {
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.rotation.x = Math.PI / 2.2;
   group.add(ring);
+  rotatingShells.push({ mesh: ring, axis: 'z', speed: 0.00009 });
+
+  // a second, wider ring at a different tilt -- two intersecting orbit paths
+  // read as "autonomous process running," distinct from a single-shell node
+  const ring2Geo = new THREE.TorusGeometry(1.32, 0.014, 8, 48);
+  const ring2Mat = new THREE.MeshBasicMaterial({ color: COLORS.amber, transparent:true, opacity:0.28 });
+  const ring2 = new THREE.Mesh(ring2Geo, ring2Mat);
+  ring2.rotation.x = -Math.PI / 3.4;
+  ring2.rotation.y = Math.PI / 5;
+  group.add(ring2);
+  rotatingShells.push({ mesh: ring2, axis: 'y', speed: -0.00006 });
+
+  const glow = makeGlowSprite(COLORS.amber, 4.6, 0.5);
+  group.add(glow);
 
   nodeGroup.add(group);
   nodeMeshes[id] = coreMesh;
   nodeMeshes[id + '-group'] = group;
+  nodeMeshes[id + '-glow'] = glow;
 
   const lbl = makeLabel(label, { mono: true, size: 40, color:'#F2A65A', weight:'600' });
   lbl.position.set(0, 1.7, 0);
@@ -389,16 +485,26 @@ function updatePulses(deltaMs) {
 // briefly boost a node's emissive intensity + scale when a pulse arrives
 function flashNode(id) {
   const mesh = nodeMeshes[id];
-  if (!mesh || !mesh.material) return;
-  mesh.userData.flash = 1.0;
+  if (mesh && mesh.material) mesh.userData.flash = 1.0;
+  const glow = nodeMeshes[id + '-glow'];
+  if (glow && glow.material) glow.userData.flash = 1.0;
 }
 function updateFlashes() {
   Object.values(nodeMeshes).forEach(m => {
     if (!m || !m.material || typeof m.userData.flash !== 'number' || m.userData.flash <= 0) return;
     m.userData.flash = Math.max(0, m.userData.flash - 0.035);
-    const base = m.userData.baseEmissive ?? 0.35;
-    m.material.emissiveIntensity = base + m.userData.flash * 1.3;
-    m.scale.setScalar(1 + m.userData.flash * 0.35);
+    if (m.isSprite) {
+      // glow sprites brighten and swell rather than gaining "emissive" --
+      // they're additive-blended flat quads, not lit geometry
+      const baseOp = m.userData.baseOpacity ?? 0.5;
+      const baseScale = m.userData.baseScale ?? 3.2;
+      m.material.opacity = Math.min(1, baseOp + m.userData.flash * 0.55);
+      m.scale.setScalar(baseScale * (1 + m.userData.flash * 0.4));
+    } else {
+      const base = m.userData.baseEmissive ?? 0.35;
+      m.material.emissiveIntensity = base + m.userData.flash * 1.3;
+      m.scale.setScalar(1 + m.userData.flash * 0.35);
+    }
   });
 }
 
@@ -553,6 +659,12 @@ function animate(now) {
     theta += 0.0009;
     updateCamera();
   }
+
+  // containment shells and orbit rings spin at their own slow rate regardless
+  // of camera motion or pause state -- they're ambient texture, not part of
+  // the scripted orchestration sequence
+  rotatingShells.forEach(s => { s.mesh.rotation[s.axis] += s.speed * deltaMs; });
+  if (starField && !reducedMotion) starField.rotation.y += 0.00003 * deltaMs;
 
   if (!paused) {
     advanceSequencer(deltaMs);
