@@ -406,6 +406,61 @@ function addDelegateNode(id, pos, label, sublabel) {
   return group;
 }
 
+// github service node: a simplified octocat-style silhouette (rounded head +
+// two pointed ears) built from primitives, so the github endpoint reads as
+// something more specific than the same low-poly sphere used for every other
+// direct-call service.
+function addGithubNode(id, pos, label, sublabel) {
+  const group = new THREE.Group();
+  group.position.set(...pos);
+
+  const color = COLORS.sage;
+  const mat = new THREE.MeshPhysicalMaterial({
+    color, emissive: color, emissiveIntensity: 0.32,
+    roughness: 0.35, metalness: 0.25, clearcoat: 0.6, clearcoatRoughness: 0.25,
+    flatShading: true,
+  });
+
+  const headGeo = new THREE.IcosahedronGeometry(0.5, 1);
+  const head = new THREE.Mesh(headGeo, mat);
+  head.userData.baseEmissive = 0.32;
+  group.add(head);
+
+  const earGeo = new THREE.ConeGeometry(0.2, 0.38, 4);
+  const earL = new THREE.Mesh(earGeo, mat);
+  earL.position.set(-0.34, 0.42, 0);
+  earL.rotation.z = 0.35;
+  group.add(earL);
+  const earR = new THREE.Mesh(earGeo, mat);
+  earR.position.set(0.34, 0.42, 0);
+  earR.rotation.z = -0.35;
+  group.add(earR);
+
+  const shellGeo = new THREE.IcosahedronGeometry(0.5 * 1.6, 1);
+  const shellMat = new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.2 });
+  const shell = new THREE.Mesh(shellGeo, shellMat);
+  group.add(shell);
+  rotatingShells.push({ mesh: shell, axis: 'y', speed: 0.00005 });
+
+  const glow = makeGlowSprite(color, 0.62 * 5.2, 0.45);
+  group.add(glow);
+
+  nodeGroup.add(group);
+  nodeMeshes[id] = head;
+  nodeMeshes[id + '-glow'] = glow;
+
+  const lbl = makeLabel(label, { mono: true, size: 40, color:'#E8EDF2' });
+  lbl.position.set(0, 0.5 + 0.9, 0);
+  group.add(lbl);
+
+  if (sublabel) {
+    const sub = makeLabel(sublabel, { mono: true, size: 26, color:'#7C8798' });
+    sub.position.set(0, -0.5 - 0.9, 0);
+    group.add(sub);
+  }
+  return head;
+}
+
 // agent -> core
 addNode('agent', graph.agent.pos, graph.agent.r, graph.agent.color, 'agent');
 addNode('core', graph.core.pos, graph.core.r, graph.core.color, 'madmcp');
@@ -413,7 +468,11 @@ addWire(graph.agent.pos, graph.core.pos, COLORS.wire, 0.6);
 
 // core -> services (DIRECT CALL — thin solid wire, one hop)
 graph.services.forEach(s => {
-  addNode(s.id, s.pos, 0.62, COLORS.sage, s.label, s.tool);
+  if (s.id === 'github') {
+    addGithubNode(s.id, s.pos, s.label, s.tool);
+  } else {
+    addNode(s.id, s.pos, 0.62, COLORS.sage, s.label, s.tool);
+  }
   addWire(graph.core.pos, s.pos, COLORS.wire, 0.45);
 });
 
