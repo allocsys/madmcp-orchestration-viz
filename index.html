@@ -72,7 +72,7 @@
   <div class="thesis">One agent. <em>Every</em> repo, doc, and worker — orchestrated through a single protocol.</div>
 </header>
 
-<div id="hint">STATIC SCAFFOLD — step 2/5<br/>animation arrives in step 3</div>
+<div id="hint">ORCHESTRATION LIVE — step 3/5<br/>copy &amp; UI chrome arrive in step 4</div>
 
 <div id="ticker">
   <div class="line">&gt; system ready — <span class="fn">madmcp</span> core online</div>
@@ -84,11 +84,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 /* ---------------------------------------------------------
-   madmcp orchestration viz — STEP 2: static scene architecture
+   madmcp orchestration viz — STEP 3: orchestration animation
    Node graph: Agent -> madmcp core -> service spokes -> repo leaves
-   No animation yet (that's step 3). Camera has gentle manual
-   orbit via drag only, no autoplay, so the static layout is
-   inspectable during dev.
+   A scripted pulse sequence now travels the graph: direct calls
+   (core -> service) and delegation (core -> delegate_gemini ->
+   repos/services), with node flashes and a live ticker log.
+   Camera retains manual drag-orbit plus slow idle spin.
 --------------------------------------------------------- */
 
 const COLORS = {
@@ -193,6 +194,7 @@ function addNode(id, pos, radius, color, label, sublabel) {
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(...pos);
+  mesh.userData.baseEmissive = 0.35;
   nodeGroup.add(mesh);
   nodeMeshes[id] = mesh;
 
@@ -249,6 +251,7 @@ function addDelegateNode(id, pos, label, sublabel) {
     roughness: 0.35, metalness: 0.15, flatShading: true,
   });
   const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+  coreMesh.userData.baseEmissive = 0.45;
   group.add(coreMesh);
 
   const ringGeo = new THREE.TorusGeometry(1.05, 0.02, 8, 48);
@@ -308,6 +311,130 @@ graph.services.forEach(s => {
   addConnector(delegateGemini.pos, s.pos, 0.025, COLORS.amber, 0.4);
 });
 
+// ---- STEP 3: orchestration animation ----
+// position lookup by node id, so sequence steps can just say 'from'/'to'
+const nodePositions = { agent: graph.agent.pos, core: graph.core.pos };
+graph.services.forEach(s => nodePositions[s.id] = s.pos);
+graph.delegates.forEach(d => nodePositions[d.id] = d.pos);
+graph.repos.forEach(r => nodePositions[r.id] = r.pos);
+
+// a pulse is a small glowing orb that travels start->end over `duration` ms,
+// then is retired. Independent of the static wire/connector meshes above --
+// those just show the topology; pulses show traffic moving through it.
+const activePulses = [];
+function spawnPulse(fromId, toId, color, duration = 900) {
+  const from = nodePositions[fromId], to = nodePositions[toId];
+  if (!from || !to) return;
+  const geo = new THREE.SphereGeometry(0.16, 12, 12);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(...from);
+  nodeGroup.add(mesh);
+  activePulses.push({
+    mesh,
+    from: new THREE.Vector3(...from),
+    to: new THREE.Vector3(...to),
+    t: 0,
+    duration,
+  });
+}
+
+function updatePulses(deltaMs) {
+  for (let i = activePulses.length - 1; i >= 0; i--) {
+    const p = activePulses[i];
+    p.t += deltaMs;
+    const frac = Math.min(p.t / p.duration, 1);
+    const eased = frac < 0.5 ? 2 * frac * frac : -1 + (4 - 2 * frac) * frac; // easeInOutQuad
+    p.mesh.position.lerpVectors(p.from, p.to, eased);
+    p.mesh.material.opacity = frac > 0.85 ? Math.max(0, 1 - (frac - 0.85) / 0.15) : 1;
+    if (frac >= 1) {
+      nodeGroup.remove(p.mesh);
+      p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+      activePulses.splice(i, 1);
+    }
+  }
+}
+
+// briefly boost a node's emissive intensity + scale when a pulse arrives
+function flashNode(id) {
+  const mesh = nodeMeshes[id];
+  if (!mesh || !mesh.material) return;
+  mesh.userData.flash = 1.0;
+}
+function updateFlashes() {
+  Object.values(nodeMeshes).forEach(m => {
+    if (!m || !m.material || typeof m.userData.flash !== 'number' || m.userData.flash <= 0) return;
+    m.userData.flash = Math.max(0, m.userData.flash - 0.035);
+    const base = m.userData.baseEmissive ?? 0.35;
+    m.material.emissiveIntensity = base + m.userData.flash * 1.3;
+    m.scale.setScalar(1 + m.userData.flash * 0.35);
+  });
+}
+
+// the scripted orchestration: agent dispatches -> core fans out direct calls
+// to every service, one at a time -> core hands the whole task off to
+// delegate_gemini, which fans out to ALL its targets AT ONCE (that's the point
+// of delegation: one handoff, many simultaneous sub-investigations) -> the
+// consolidated result travels back through core to the agent as two visible hops.
+// Each step's `pulses` array fires together in the same tick; `msg` describes the step.
+const sequence = [
+  { pulses: [{ from: 'agent', to: 'core' }], kind: 'direct',
+    msg: 'agent dispatches task -&gt; <span class="fn">madmcp</span> core' },
+  { pulses: [{ from: 'core', to: 'github' }], kind: 'direct',
+    msg: 'core -&gt; <span class="fn">github</span>: direct call' },
+  { pulses: [{ from: 'core', to: 'notion' }], kind: 'direct',
+    msg: 'core -&gt; <span class="fn">notion</span>: direct call' },
+  { pulses: [{ from: 'core', to: 'cloudflare' }], kind: 'direct',
+    msg: 'core -&gt; <span class="fn">cloudflare</span>: direct call' },
+  { pulses: [{ from: 'core', to: 'mem0' }], kind: 'direct',
+    msg: 'core -&gt; <span class="fn">mem0</span>: direct call' },
+  { pulses: [{ from: 'core', to: 'delegate-gemini' }], kind: 'delegate',
+    msg: 'core -&gt; <span class="fn">delegate_gemini</span>: handoff (autonomous)' },
+  { pulses: [
+      { from: 'delegate-gemini', to: 'api-service' },
+      { from: 'delegate-gemini', to: 'worker-queue' },
+      { from: 'delegate-gemini', to: 'shared-types' },
+      { from: 'delegate-gemini', to: 'github' },
+      { from: 'delegate-gemini', to: 'notion' },
+    ], kind: 'fanout',
+    msg: '<span class="fn">delegate_gemini</span> fans out to 5 targets in parallel' },
+  { pulses: [{ from: 'delegate-gemini', to: 'core' }], kind: 'return',
+    msg: '<span class="fn">delegate_gemini</span> -&gt; core: consolidated result' },
+  { pulses: [{ from: 'core', to: 'agent' }], kind: 'return',
+    msg: 'core -&gt; agent: synthesized answer returned' },
+];
+const KIND_COLOR = { direct: COLORS.sage, delegate: COLORS.amber, fanout: COLORS.amber, return: COLORS.text };
+
+// ---- ticker log: rolling last few lines, most recent highlighted ----
+const tickerEl = document.getElementById('ticker');
+const logLines = ['system ready — <span class="fn">madmcp</span> core online'];
+function pushLog(msg) {
+  logLines.push(msg);
+  if (logLines.length > 4) logLines.shift();
+  tickerEl.innerHTML = logLines
+    .map((l, i) => `<div class="line${i === logLines.length - 1 ? ' active' : ''}">&gt; ${l}</div>`)
+    .join('');
+}
+
+// ---- sequencer driver: advances one step every STEP_GAP ms, looping forever ----
+const STEP_GAP = 1200;
+let seqIndex = 0;
+let timeSinceStep = STEP_GAP; // fire the first step immediately
+function advanceSequencer(deltaMs) {
+  timeSinceStep += deltaMs;
+  if (timeSinceStep < STEP_GAP) return;
+  timeSinceStep = 0;
+  const step = sequence[seqIndex % sequence.length];
+  const color = KIND_COLOR[step.kind] ?? COLORS.wire;
+  step.pulses.forEach(({ from, to }) => {
+    spawnPulse(from, to, color);
+    flashNode(to);
+  });
+  pushLog(step.msg);
+  seqIndex++;
+}
+
 // ---- manual drag-orbit (no OrbitControls dependency) ----
 let isDragging = false, prevX = 0, prevY = 0;
 let theta = 0.35, phi = 1.15, radius = 26; // spherical coords around origin
@@ -343,18 +470,27 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ---- render loop (idle ambient rotation only — orchestration pulses come in step 3) ----
+// ---- render loop: idle ambient rotation + orchestration pulses (step 3) ----
 let idleSpin = 0;
-function animate() {
+let lastFrameTime = performance.now();
+function animate(now) {
   requestAnimationFrame(animate);
+  const deltaMs = Math.min(now - lastFrameTime, 100); // clamp so a tab-switch doesn't cause a huge jump
+  lastFrameTime = now;
+
   if (!isDragging) {
     idleSpin += 0.0009;
     theta += 0.0009;
     updateCamera();
   }
+
+  advanceSequencer(deltaMs);
+  updatePulses(deltaMs);
+  updateFlashes();
+
   renderer.render(scene, camera);
 }
-animate();
+requestAnimationFrame(animate);
 </script>
 </body>
 </html>
