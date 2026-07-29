@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>madmcp — orchestration</title>
+<style>
+  :root{
+    --base:#0E1420;
+    --panel:#16202E;
+    --wire:#4A6B8A;
+    --amber:#F2A65A;
+    --sage:#6FCF97;
+    --text:#E8EDF2;
+    --muted:#7C8798;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--base);color:var(--text);
+    font-family:'IBM Plex Sans',system-ui,sans-serif; overflow:hidden; height:100%;}
+  #canvas-wrap{position:fixed; inset:0;}
+  canvas{display:block;}
+
+  header{
+    position:fixed; top:0; left:0; padding:24px 28px; z-index:10;
+    pointer-events:none;
+  }
+  .mark{
+    font-family:'Space Grotesk',system-ui,sans-serif;
+    font-size:15px; font-weight:600; letter-spacing:0.04em;
+    color:var(--text); text-transform:lowercase;
+  }
+  .mark span{color:var(--amber);}
+  .thesis{
+    font-family:'Space Grotesk',system-ui,sans-serif;
+    font-size:22px; font-weight:500; margin-top:6px; max-width:420px;
+    line-height:1.35; color:var(--text);
+  }
+  .thesis em{color:var(--sage); font-style:normal;}
+
+  #ticker{
+    position:fixed; bottom:0; left:0; right:0; z-index:10;
+    background:linear-gradient(180deg, rgba(14,20,32,0) 0%, rgba(14,20,32,0.92) 40%);
+    padding:40px 28px 18px;
+    font-family:'IBM Plex Mono', ui-monospace, monospace;
+    font-size:12.5px; color:var(--muted);
+    pointer-events:none;
+  }
+  #ticker .line{margin:2px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  #ticker .line.active{color:var(--amber);}
+  #ticker .line .fn{color:var(--sage);}
+
+  #hint{
+    position:fixed; top:24px; right:28px; z-index:10;
+    font-family:'IBM Plex Mono', ui-monospace, monospace;
+    font-size:11px; color:var(--muted); text-align:right;
+    letter-spacing:0.03em;
+  }
+
+  @media (max-width: 640px){
+    .thesis{font-size:17px; max-width:70vw;}
+    #ticker{font-size:11px;}
+    #hint{display:none;}
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap"></div>
+
+<header>
+  <div class="mark">mad<span>mcp</span></div>
+  <div class="thesis">One agent. <em>Every</em> repo, doc, and worker — orchestrated through a single protocol.</div>
+</header>
+
+<div id="hint">STATIC SCAFFOLD — step 2/5<br/>animation arrives in step 3</div>
+
+<div id="ticker">
+  <div class="line">&gt; system ready — <span class="fn">madmcp</span> core online</div>
+  <div class="line">&gt; 12 tools loaded across 4 services</div>
+  <div class="line active">&gt; awaiting orchestration sequence…</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ---------------------------------------------------------
+   madmcp orchestration viz — STEP 2: static scene architecture
+   Node graph: Agent -> madmcp core -> service spokes -> repo leaves
+   No animation yet (that's step 3). Camera has gentle manual
+   orbit via drag only, no autoplay, so the static layout is
+   inspectable during dev.
+--------------------------------------------------------- */
+
+const COLORS = {
+  base: 0x0E1420,
+  wire: 0x4A6B8A,
+  amber: 0xF2A65A,
+  sage: 0x6FCF97,
+  text: 0xE8EDF2,
+};
+
+// ---- renderer / scene / camera ----
+const wrap = document.getElementById('canvas-wrap');
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(COLORS.base, 0.028);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 1000);
+camera.position.set(0, 6, 26);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(COLORS.base, 1);
+wrap.appendChild(renderer.domElement);
+
+// ---- lighting: minimal, since nodes are emissive-ish ----
+scene.add(new THREE.AmbientLight(0x3a4658, 1.1));
+const key = new THREE.PointLight(0xffffff, 0.6, 100);
+key.position.set(10, 15, 20);
+scene.add(key);
+
+// ---- label sprite helper (canvas texture) ----
+function makeLabel(text, opts = {}) {
+  const {
+    size = 64,
+    color = '#E8EDF2',
+    mono = true,
+    weight = '500',
+  } = opts;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const font = `${weight} ${size}px ${mono ? "'IBM Plex Mono', monospace" : "'Space Grotesk', sans-serif"}`;
+  ctx.font = font;
+  const metrics = ctx.measureText(text);
+  const padX = 24;
+  canvas.width = Math.ceil(metrics.width) + padX * 2;
+  canvas.height = size * 1.6;
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, canvas.width/2, canvas.height/2);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  const scale = 0.011;
+  sprite.scale.set(canvas.width*scale, canvas.height*scale, 1);
+  return sprite;
+}
+
+// ---- node graph data ----
+// layered radial layout: agent (top) -> core (center) -> services (ring) -> repos (outer leaves under github)
+const graph = {
+  agent: { pos: [0, 9, 0], label: 'agent', color: COLORS.text, r: 0.55 },
+  core:  { pos: [0, 0, 0], label: 'madmcp', color: COLORS.amber, r: 1.0 },
+  services: [
+    { id:'github',    pos:[-9, -1,  4], label:'github',     tool:'create_repo · get_pull_requests · search_code' },
+    { id:'notion',     pos:[ 9, -1,  4], label:'notion',     tool:'notion_search · notion_query_database' },
+    { id:'cloudflare', pos:[-9, -1, -6], label:'cloudflare', tool:'cf_workers_list · cf_d1_database_query' },
+    { id:'mem0',       pos:[ 9, -1, -6], label:'mem0',       tool:'mem0_search · mem0_add' },
+  ],
+  repos: [
+    { id:'api-service',    pos:[-15,  2,  9], label:'api-service' },
+    { id:'worker-queue',   pos:[-16, -4,  5], label:'worker-queue' },
+    { id:'shared-types',   pos:[-13, -5, 11], label:'shared-types' },
+  ]
+};
+
+const nodeGroup = new THREE.Group();
+scene.add(nodeGroup);
+
+const nodeMeshes = {}; // id -> mesh, for step 3 pulse targeting
+const lines = [];
+
+function addNode(id, pos, radius, color, label, sublabel) {
+  const geo = new THREE.SphereGeometry(radius, 24, 24);
+  const mat = new THREE.MeshStandardMaterial({
+    color, emissive: color, emissiveIntensity: 0.35,
+    roughness: 0.4, metalness: 0.1,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(...pos);
+  nodeGroup.add(mesh);
+  nodeMeshes[id] = mesh;
+
+  const lbl = makeLabel(label, { mono: true, size: 40, color:'#E8EDF2' });
+  lbl.position.set(pos[0], pos[1] + radius + 0.9, pos[2]);
+  nodeGroup.add(lbl);
+
+  if (sublabel) {
+    const sub = makeLabel(sublabel, { mono: true, size: 26, color:'#7C8798' });
+    sub.position.set(pos[0], pos[1] - radius - 0.9, pos[2]);
+    nodeGroup.add(sub);
+  }
+  return mesh;
+}
+
+function addWire(a, b, color = COLORS.wire, opacity = 0.5) {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(...a), new THREE.Vector3(...b)
+  ]);
+  const mat = new THREE.LineBasicMaterial({ color, transparent:true, opacity });
+  const line = new THREE.Line(geo, mat);
+  nodeGroup.add(line);
+  lines.push(line);
+  return line;
+}
+
+// agent -> core
+addNode('agent', graph.agent.pos, graph.agent.r, graph.agent.color, 'agent');
+addNode('core', graph.core.pos, graph.core.r, graph.core.color, 'madmcp');
+addWire(graph.agent.pos, graph.core.pos, COLORS.wire, 0.6);
+
+// core -> services
+graph.services.forEach(s => {
+  addNode(s.id, s.pos, 0.62, COLORS.sage, s.label, s.tool);
+  addWire(graph.core.pos, s.pos, COLORS.wire, 0.45);
+});
+
+// github -> repo leaves
+const github = graph.services.find(s => s.id === 'github');
+graph.repos.forEach(r => {
+  addNode(r.id, r.pos, 0.32, 0x8CA3BD, r.label);
+  addWire(github.pos, r.pos, COLORS.wire, 0.3);
+});
+
+// ---- manual drag-orbit (no OrbitControls dependency) ----
+let isDragging = false, prevX = 0, prevY = 0;
+let theta = 0.35, phi = 1.15, radius = 26; // spherical coords around origin
+function updateCamera() {
+  camera.position.x = radius * Math.sin(phi) * Math.sin(theta);
+  camera.position.z = radius * Math.sin(phi) * Math.cos(theta);
+  camera.position.y = radius * Math.cos(phi);
+  camera.lookAt(0, 1, 0);
+}
+updateCamera();
+
+renderer.domElement.addEventListener('pointerdown', e => {
+  isDragging = true; prevX = e.clientX; prevY = e.clientY;
+});
+window.addEventListener('pointerup', () => isDragging = false);
+window.addEventListener('pointermove', e => {
+  if (!isDragging) return;
+  const dx = e.clientX - prevX, dy = e.clientY - prevY;
+  theta -= dx * 0.0045;
+  phi = Math.min(Math.max(phi - dy * 0.0045, 0.5), 1.9);
+  prevX = e.clientX; prevY = e.clientY;
+  updateCamera();
+});
+renderer.domElement.addEventListener('wheel', e => {
+  radius = Math.min(Math.max(radius + e.deltaY * 0.02, 14), 42);
+  updateCamera();
+}, { passive: true });
+
+// ---- resize ----
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---- render loop (idle ambient rotation only — orchestration pulses come in step 3) ----
+let idleSpin = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  if (!isDragging) {
+    idleSpin += 0.0009;
+    theta += 0.0009;
+    updateCamera();
+  }
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
