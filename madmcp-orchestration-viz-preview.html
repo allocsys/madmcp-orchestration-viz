@@ -278,6 +278,12 @@ const nodeMeshes = {}; // id -> mesh, for step 3 pulse targeting
 const lines = [];
 const rotatingShells = []; // { mesh, axis, speed } -- containment shells/rings that spin idly
 
+const nodeGroups = {}; // id -> outer THREE.Group, for entrance-choreography scale-in
+const entranceStart = performance.now();
+const entranceItems = []; // { group, delay, duration } -- populated after graph build
+const wireEntranceItems = []; // { mesh, targetOpacity, delay, duration }
+const entranceReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 // each node is three parts, not one sphere:
 //  1. a faceted low-poly crystal core (icosahedron, flat-shaded) -- reads as a
 //     cut data-gem rather than a flat colored dot
@@ -321,6 +327,7 @@ function addNode(id, pos, radius, color, label, sublabel) {
     sub.position.set(0, -radius - 0.9, 0);
     group.add(sub);
   }
+  nodeGroups[id] = group;
   return coreMesh;
 }
 
@@ -403,6 +410,7 @@ function addDelegateNode(id, pos, label, sublabel) {
     sub.position.set(0, -1.5, 0);
     group.add(sub);
   }
+  nodeGroups[id] = group;
   return group;
 }
 
@@ -458,42 +466,78 @@ function addGithubNode(id, pos, label, sublabel) {
     sub.position.set(0, -0.5 - 0.9, 0);
     group.add(sub);
   }
+  nodeGroups[id] = group;
   return head;
+}
+
+// entrance-choreography phase timing (ms from page load) -- nodes scale in
+// agent -> core -> services -> delegate -> repos, each phase overlapping
+// slightly into the next so it reads as one continuous beat, not four stops.
+const ENTRANCE_PHASE = { agent: 0, core: 220, services: 460, delegate: 760, repos: 1000 };
+const ENTRANCE_NODE_DURATION = 480;
+const ENTRANCE_WIRE_DURATION = 320;
+const ENTRANCE_STAGGER = 60; // ms between siblings within the same phase
+const ENTRANCE_TOTAL_MS = ENTRANCE_PHASE.repos + ENTRANCE_STAGGER * 3 + ENTRANCE_NODE_DURATION + 200;
+
+function registerNodeEntrance(id, delay) {
+  const group = nodeGroups[id];
+  if (!group) return;
+  if (entranceReducedMotion) { group.scale.setScalar(1); return; }
+  group.scale.setScalar(0.0001);
+  entranceItems.push({ group, delay, duration: ENTRANCE_NODE_DURATION });
+}
+function registerWireEntrance(mesh, targetOpacity, delay) {
+  if (!mesh) return;
+  if (entranceReducedMotion) { mesh.material.opacity = targetOpacity; return; }
+  mesh.material.opacity = 0;
+  wireEntranceItems.push({ mesh, targetOpacity, delay, duration: ENTRANCE_WIRE_DURATION });
 }
 
 // agent -> core
 addNode('agent', graph.agent.pos, graph.agent.r, graph.agent.color, 'agent');
 addNode('core', graph.core.pos, graph.core.r, graph.core.color, 'madmcp');
-addWire(graph.agent.pos, graph.core.pos, COLORS.wire, 0.6);
+registerNodeEntrance('agent', ENTRANCE_PHASE.agent);
+registerNodeEntrance('core', ENTRANCE_PHASE.core);
+const agentCoreWire = addWire(graph.agent.pos, graph.core.pos, COLORS.wire, 0.6);
+registerWireEntrance(agentCoreWire, 0.6, ENTRANCE_PHASE.core + 150);
 
 // core -> services (DIRECT CALL — thin solid wire, one hop)
-graph.services.forEach(s => {
+graph.services.forEach((s, i) => {
   if (s.id === 'github') {
     addGithubNode(s.id, s.pos, s.label, s.tool);
   } else {
     addNode(s.id, s.pos, 0.62, COLORS.sage, s.label, s.tool);
   }
-  addWire(graph.core.pos, s.pos, COLORS.wire, 0.45);
+  const delay = ENTRANCE_PHASE.services + i * ENTRANCE_STAGGER;
+  registerNodeEntrance(s.id, delay);
+  const w = addWire(graph.core.pos, s.pos, COLORS.wire, 0.45);
+  registerWireEntrance(w, 0.45, delay + 130);
 });
 
 // core -> delegate-gemini (DELEGATION — solid amber connector, thicker than a
 // direct-call wire since it's a heavier relationship: a handoff, not a ping)
 graph.delegates.forEach(d => {
   addDelegateNode(d.id, d.pos, d.label, d.tool);
-  addConnector(graph.core.pos, d.pos, 0.05, COLORS.amber, 0.85);
+  registerNodeEntrance(d.id, ENTRANCE_PHASE.delegate);
+  const c = addConnector(graph.core.pos, d.pos, 0.05, COLORS.amber, 0.85);
+  registerWireEntrance(c, 0.85, ENTRANCE_PHASE.delegate + 130);
 });
 
 // delegate-gemini -> repo leaves (the sub-agent's OWN fan-out, not core's)
 const delegateGemini = graph.delegates[0];
-graph.repos.forEach(r => {
+graph.repos.forEach((r, i) => {
   addNode(r.id, r.pos, 0.32, 0x8CA3BD, r.label);
-  addConnector(delegateGemini.pos, r.pos, 0.03, COLORS.amber, 0.55);
+  const delay = ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER;
+  registerNodeEntrance(r.id, delay);
+  const c = addConnector(delegateGemini.pos, r.pos, 0.03, COLORS.amber, 0.55);
+  registerWireEntrance(c, 0.55, delay + 130);
 });
 
 // delegate-gemini -> services too -- it isn't limited to repos, it can read
 // across any connected module (github, notion, cloudflare, mem0) once dispatched
-graph.services.forEach(s => {
-  addConnector(delegateGemini.pos, s.pos, 0.025, COLORS.amber, 0.4);
+graph.services.forEach((s, i) => {
+  const c = addConnector(delegateGemini.pos, s.pos, 0.025, COLORS.amber, 0.4);
+  registerWireEntrance(c, 0.4, ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER + 200);
 });
 
 // ---- STEP 3: orchestration animation ----
@@ -652,6 +696,41 @@ function updateFlashes(deltaMs) {
   });
 }
 
+// entrance-choreography easing: reuse the same "punch past 1, land on target"
+// feel as the flash envelope, but for scale (spring pop-in) and opacity
+// (plain ease-out, no overshoot -- opacity overshoot would just clip at 1).
+function entranceScaleEase(t) {
+  const c1 = 1.7, c3 = c1 + 1, tm1 = t - 1;
+  return 1 + c3 * tm1 * tm1 * tm1 + c1 * tm1 * tm1;
+}
+function entranceOpacityEase(t) {
+  const u = 1 - t;
+  return 1 - u * u * u;
+}
+let entranceDone = false;
+function updateEntrance(nowMs) {
+  if (entranceDone) return;
+  const elapsed = nowMs - entranceStart;
+  let stillAnimating = false;
+  entranceItems.forEach(item => {
+    if (item.done) return;
+    const t = elapsed - item.delay;
+    if (t < 0) { stillAnimating = true; return; }
+    const frac = Math.min(t / item.duration, 1);
+    item.group.scale.setScalar(Math.max(entranceScaleEase(frac), 0.0001));
+    if (frac >= 1) item.done = true; else stillAnimating = true;
+  });
+  wireEntranceItems.forEach(item => {
+    if (item.done) return;
+    const t = elapsed - item.delay;
+    if (t < 0) { stillAnimating = true; return; }
+    const frac = Math.min(t / item.duration, 1);
+    item.mesh.material.opacity = item.targetOpacity * entranceOpacityEase(frac);
+    if (frac >= 1) item.done = true; else stillAnimating = true;
+  });
+  if (!stillAnimating) entranceDone = true;
+}
+
 // the scripted orchestration: agent dispatches -> core fans out direct calls
 // to every service, one at a time -> core hands the whole task off to
 // delegate_gemini, which fans out to ALL its targets AT ONCE (that's the point
@@ -700,7 +779,10 @@ function pushLog(msg) {
 // ---- sequencer driver: advances one step every STEP_GAP ms, looping forever ----
 const STEP_GAP = 1200;
 let seqIndex = 0;
-let timeSinceStep = STEP_GAP; // fire the first step immediately
+// first step fires STEP_GAP ms after entrance choreography finishes, not at
+// page load -- otherwise pulses would start flying while nodes are still
+// popping in.
+let timeSinceStep = entranceReducedMotion ? STEP_GAP : STEP_GAP - ENTRANCE_TOTAL_MS;
 function advanceSequencer(deltaMs) {
   timeSinceStep += deltaMs;
   if (timeSinceStep < STEP_GAP) return;
@@ -797,6 +879,8 @@ function animate(now) {
   requestAnimationFrame(animate);
   const deltaMs = Math.min(now - lastFrameTime, 100); // clamp so a tab-switch doesn't cause a huge jump
   lastFrameTime = now;
+
+  updateEntrance(now);
 
   if (!isDragging && !reducedMotion) {
     idleSpin += 0.0009;
