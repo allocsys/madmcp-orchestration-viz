@@ -76,7 +76,8 @@
 
 <div id="ticker">
   <div class="line">&gt; system ready — <span class="fn">madmcp</span> core online</div>
-  <div class="line">&gt; 12 tools loaded across 4 services</div>
+  <div class="line">&gt; direct calls: github · notion · cloudflare · mem0</div>
+  <div class="line">&gt; delegation: <span class="fn">delegate_gemini</span> — hands off, doesn't just call</div>
   <div class="line active">&gt; awaiting orchestration sequence…</div>
 </div>
 
@@ -150,7 +151,11 @@ function makeLabel(text, opts = {}) {
 }
 
 // ---- node graph data ----
-// layered radial layout: agent (top) -> core (center) -> services (ring) -> repos (outer leaves under github)
+// layered radial layout: agent (top) -> core (center) -> [direct-call services] + [delegation]
+// Two fundamentally different edge types out of core:
+//   DIRECT CALL  core -> service        (one hop, single action)
+//   DELEGATION   core -> delegate-agent -> repos  (handoff to an autonomous sub-agent
+//                                                   that does its own multi-hop work)
 const graph = {
   agent: { pos: [0, 9, 0], label: 'agent', color: COLORS.text, r: 0.55 },
   core:  { pos: [0, 0, 0], label: 'madmcp', color: COLORS.amber, r: 1.0 },
@@ -159,6 +164,11 @@ const graph = {
     { id:'notion',     pos:[ 9, -1,  4], label:'notion',     tool:'notion_search · notion_query_database' },
     { id:'cloudflare', pos:[-9, -1, -6], label:'cloudflare', tool:'cf_workers_list · cf_d1_database_query' },
     { id:'mem0',       pos:[ 9, -1, -6], label:'mem0',       tool:'mem0_search · mem0_add' },
+  ],
+  // delegation: core hands the WHOLE task to this sub-agent, which independently
+  // fans out to multiple repos and reports back one consolidated result.
+  delegates: [
+    { id:'delegate-gemini', pos:[-6, -6, 11], label:'delegate_gemini', tool:'autonomous multi-repo investigation' },
   ],
   repos: [
     { id:'api-service',    pos:[-15,  2,  9], label:'api-service' },
@@ -207,22 +217,83 @@ function addWire(a, b, color = COLORS.wire, opacity = 0.5) {
   return line;
 }
 
+// dashed "handoff" edge — visually distinct from a direct-call wire, since
+// dispatching to a delegate is a different kind of relationship than a tool call
+function addHandoffWire(a, b, color = COLORS.amber, opacity = 0.75) {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(...a), new THREE.Vector3(...b)
+  ]);
+  const mat = new THREE.LineDashedMaterial({ color, transparent:true, opacity, dashSize: 0.45, gapSize: 0.3 });
+  const line = new THREE.Line(geo, mat);
+  line.computeLineDistances();
+  nodeGroup.add(line);
+  lines.push(line);
+  return line;
+}
+
+// delegate/sub-agent node: octahedron core + a wireframe ring, distinct from the
+// plain spheres used for direct-call services — signals "autonomous process", not
+// a single endpoint
+function addDelegateNode(id, pos, label, sublabel) {
+  const group = new THREE.Group();
+  group.position.set(...pos);
+
+  const coreGeo = new THREE.OctahedronGeometry(0.68, 0);
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: COLORS.amber, emissive: COLORS.amber, emissiveIntensity: 0.45,
+    roughness: 0.35, metalness: 0.15, flatShading: true,
+  });
+  const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+  group.add(coreMesh);
+
+  const ringGeo = new THREE.TorusGeometry(1.05, 0.02, 8, 48);
+  const ringMat = new THREE.MeshBasicMaterial({ color: COLORS.amber, transparent:true, opacity:0.5 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = Math.PI / 2.2;
+  group.add(ring);
+  const ring2 = ring.clone();
+  ring2.rotation.x = -Math.PI / 3.4;
+  ring2.rotation.y = Math.PI / 5;
+  group.add(ring2);
+
+  nodeGroup.add(group);
+  nodeMeshes[id] = coreMesh;
+  nodeMeshes[id + '-group'] = group;
+
+  const lbl = makeLabel(label, { mono: true, size: 40, color:'#F2A65A', weight:'600' });
+  lbl.position.set(0, 1.7, 0);
+  group.add(lbl);
+
+  if (sublabel) {
+    const sub = makeLabel(sublabel, { mono: true, size: 24, color:'#7C8798' });
+    sub.position.set(0, -1.5, 0);
+    group.add(sub);
+  }
+  return group;
+}
+
 // agent -> core
 addNode('agent', graph.agent.pos, graph.agent.r, graph.agent.color, 'agent');
 addNode('core', graph.core.pos, graph.core.r, graph.core.color, 'madmcp');
 addWire(graph.agent.pos, graph.core.pos, COLORS.wire, 0.6);
 
-// core -> services
+// core -> services (DIRECT CALL — thin solid wire, one hop)
 graph.services.forEach(s => {
   addNode(s.id, s.pos, 0.62, COLORS.sage, s.label, s.tool);
   addWire(graph.core.pos, s.pos, COLORS.wire, 0.45);
 });
 
-// github -> repo leaves
-const github = graph.services.find(s => s.id === 'github');
+// core -> delegate-gemini (DELEGATION — dashed handoff, distinct geometry)
+graph.delegates.forEach(d => {
+  addDelegateNode(d.id, d.pos, d.label, d.tool);
+  addHandoffWire(graph.core.pos, d.pos, COLORS.amber, 0.7);
+});
+
+// delegate-gemini -> repo leaves (the sub-agent's OWN fan-out, not core's)
+const delegateGemini = graph.delegates[0];
 graph.repos.forEach(r => {
   addNode(r.id, r.pos, 0.32, 0x8CA3BD, r.label);
-  addWire(github.pos, r.pos, COLORS.wire, 0.3);
+  addWire(delegateGemini.pos, r.pos, COLORS.amber, 0.35);
 });
 
 // ---- manual drag-orbit (no OrbitControls dependency) ----
