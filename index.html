@@ -21,7 +21,27 @@
   html,body{margin:0;padding:0;background:var(--base);color:var(--text);
     font-family:'IBM Plex Sans',system-ui,sans-serif; overflow:hidden; height:100%;}
   #canvas-wrap{position:fixed; inset:0;}
-  canvas{display:block;}
+  canvas{display:block; touch-action:none;}
+
+  /* keyboard-operable pause control -- the only focusable element in the
+     piece, since everything else is decorative/aria-hidden. Off-screen
+     until focused so it doesn't clutter the visual, but fully reachable
+     via Tab and clearly visible once it has focus. */
+  #pause-toggle{
+    position:fixed; top:24px; left:28px; z-index:20;
+    background:var(--panel); color:var(--text); border:1px solid var(--wire);
+    font-family:'IBM Plex Mono', ui-monospace, monospace; font-size:11px;
+    padding:6px 10px; border-radius:4px; cursor:pointer;
+    transform:translateY(-60px); opacity:0; transition:transform .15s, opacity .15s;
+  }
+  #pause-toggle:focus-visible{
+    transform:translateY(0); opacity:1;
+    outline:2px solid var(--amber); outline-offset:2px;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    #pause-toggle{ transform:translateY(0); opacity:1; position:fixed; top:24px; left:28px; }
+  }
 
   header{
     position:fixed; top:0; left:0; padding:24px 28px; z-index:10;
@@ -73,20 +93,22 @@
 </head>
 <body>
 
-<div id="canvas-wrap"></div>
+<div id="canvas-wrap" aria-hidden="true"></div>
+
+<button id="pause-toggle" type="button" aria-pressed="false">pause animation</button>
 
 <header>
   <div class="mark">mad<span>mcp</span></div>
   <div class="thesis">One agent. <em>Every</em> repo, doc, and worker — orchestrated through a single protocol.</div>
 </header>
 
-<div id="legend">
+<div id="legend" aria-hidden="true">
   <div class="row"><span>direct call</span><span class="dot direct"></span></div>
   <div class="row"><span>delegation</span><span class="dot delegate"></span></div>
   <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result</div>
 </div>
 
-<div id="ticker">
+<div id="ticker" aria-live="polite">
   <div class="line">&gt; system ready — <span class="fn">madmcp</span> core online</div>
   <div class="line">&gt; direct calls: github · notion · cloudflare · mem0</div>
   <div class="line active">&gt; awaiting orchestration sequence…</div>
@@ -270,10 +292,6 @@ function addDelegateNode(id, pos, label, sublabel) {
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.rotation.x = Math.PI / 2.2;
   group.add(ring);
-  const ring2 = ring.clone();
-  ring2.rotation.x = -Math.PI / 3.4;
-  ring2.rotation.y = Math.PI / 5;
-  group.add(ring2);
 
   nodeGroup.add(group);
   nodeMeshes[id] = coreMesh;
@@ -448,7 +466,12 @@ function advanceSequencer(deltaMs) {
 
 // ---- manual drag-orbit (no OrbitControls dependency) ----
 let isDragging = false, prevX = 0, prevY = 0;
-let theta = 0.35, phi = 1.15, radius = 26; // spherical coords around origin
+// on narrow/mobile viewports the graph's full vertical extent (agent at top,
+// repo leaves at bottom) doesn't fit at the desktop default distance --
+// start further back so nothing is cropped before the user zooms manually.
+const isNarrow = window.innerWidth < 640;
+let theta = 0.35, phi = 1.15, radius = isNarrow ? 34 : 26; // spherical coords around origin
+const MIN_RADIUS = isNarrow ? 20 : 14, MAX_RADIUS = isNarrow ? 46 : 42;
 function updateCamera() {
   camera.position.x = radius * Math.sin(phi) * Math.sin(theta);
   camera.position.z = radius * Math.sin(phi) * Math.cos(theta);
@@ -470,8 +493,25 @@ window.addEventListener('pointermove', e => {
   updateCamera();
 });
 renderer.domElement.addEventListener('wheel', e => {
-  radius = Math.min(Math.max(radius + e.deltaY * 0.02, 14), 42);
+  radius = Math.min(Math.max(radius + e.deltaY * 0.02, MIN_RADIUS), MAX_RADIUS);
   updateCamera();
+}, { passive: true });
+
+// pinch-to-zoom on touch (wheel doesn't fire for touch pinches)
+let pinchStartDist = null, pinchStartRadius = radius;
+function touchDist(t){ return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY); }
+renderer.domElement.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) { pinchStartDist = touchDist(e.touches); pinchStartRadius = radius; }
+}, { passive: true });
+renderer.domElement.addEventListener('touchmove', e => {
+  if (e.touches.length === 2 && pinchStartDist) {
+    const scale = pinchStartDist / touchDist(e.touches);
+    radius = Math.min(Math.max(pinchStartRadius * scale, MIN_RADIUS), MAX_RADIUS);
+    updateCamera();
+  }
+}, { passive: true });
+renderer.domElement.addEventListener('touchend', e => {
+  if (e.touches.length < 2) pinchStartDist = null;
 }, { passive: true });
 
 // ---- resize ----
@@ -481,6 +521,23 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// ---- accessibility: reduced motion + keyboard pause control ----
+// prefers-reduced-motion: reduce -> no idle camera spin, and the orchestration
+// sequence advances much slower so pulses don't read as constant flashing.
+// A visible, keyboard-focusable button also lets ANY user pause the animation
+// outright (Enter/Space activate a <button> natively -- no extra key handling
+// needed), independent of the OS-level media-query preference.
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let paused = reducedMotion; // start paused if the OS asks for reduced motion
+const pauseBtn = document.getElementById('pause-toggle');
+function setPaused(next) {
+  paused = next;
+  pauseBtn.textContent = paused ? 'play animation' : 'pause animation';
+  pauseBtn.setAttribute('aria-pressed', String(paused));
+}
+setPaused(paused);
+pauseBtn.addEventListener('click', () => setPaused(!paused));
+
 // ---- render loop: idle ambient rotation + orchestration pulses (step 3) ----
 let idleSpin = 0;
 let lastFrameTime = performance.now();
@@ -489,15 +546,17 @@ function animate(now) {
   const deltaMs = Math.min(now - lastFrameTime, 100); // clamp so a tab-switch doesn't cause a huge jump
   lastFrameTime = now;
 
-  if (!isDragging) {
+  if (!isDragging && !reducedMotion) {
     idleSpin += 0.0009;
     theta += 0.0009;
     updateCamera();
   }
 
-  advanceSequencer(deltaMs);
-  updatePulses(deltaMs);
-  updateFlashes();
+  if (!paused) {
+    advanceSequencer(deltaMs);
+    updatePulses(deltaMs);
+    updateFlashes();
+  }
 
   renderer.render(scene, camera);
 }
