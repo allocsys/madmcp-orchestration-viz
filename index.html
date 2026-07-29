@@ -302,6 +302,12 @@ graph.repos.forEach(r => {
   addConnector(delegateGemini.pos, r.pos, 0.03, COLORS.amber, 0.55);
 });
 
+// delegate-gemini -> services too -- it isn't limited to repos, it can read
+// across any connected module (github, notion, cloudflare, mem0) once dispatched
+graph.services.forEach(s => {
+  addConnector(delegateGemini.pos, s.pos, 0.025, COLORS.amber, 0.4);
+});
+
 // ---- manual drag-orbit (no OrbitControls dependency) ----
 let isDragging = false, prevX = 0, prevY = 0;
 let theta = 0.35, phi = 1.15, radius = 26; // spherical coords around origin
