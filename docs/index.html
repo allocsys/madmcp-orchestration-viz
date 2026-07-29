@@ -146,7 +146,11 @@ const COLORS = {
 // ---- renderer / scene / camera ----
 const wrap = document.getElementById('canvas-wrap');
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(COLORS.base, 0.028);
+// STEP 6: nudged from 0.028 -- the outer service ring's collision-spacing
+// pass (mem0 in particular) now sweeps out to ~11.8 units from core, vs.
+// ~10.8 at the original static layout, so fog needs to reach a touch farther
+// before it fully swallows that orbit.
+scene.fog = new THREE.FogExp2(COLORS.base, 0.024);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 1000);
 camera.position.set(0, 6, 26);
@@ -343,30 +347,201 @@ const graph = {
   agent: { pos: [0, 9, 0], label: 'agent', color: COLORS.text, r: 0.55 },
   core:  { pos: [0, 4, 0], label: 'madmcp', color: COLORS.amber, r: 1.0 },
   services: [
-    { id:'github',    pos:[-9, -1,  4], label:'github',     tool:'create_repo · get_pull_requests · search_code' },
-    { id:'notion',     pos:[ 9, -1,  4], label:'notion',     tool:'notion_search · notion_query_database' },
-    { id:'cloudflare', pos:[-9, -1, -6], label:'cloudflare', tool:'cf_workers_list · cf_d1_database_query' },
-    { id:'mem0',       pos:[ 9, -1, -6], label:'mem0',       tool:'mem0_search · mem0_add' },
+    { id:'github',    pos:[-9, -1,  4], parent:'core', label:'github',     tool:'create_repo · get_pull_requests · search_code' },
+    { id:'notion',     pos:[ 9, -1,  4], parent:'core', label:'notion',     tool:'notion_search · notion_query_database' },
+    { id:'cloudflare', pos:[-9, -1, -6], parent:'core', label:'cloudflare', tool:'cf_workers_list · cf_d1_database_query' },
+    { id:'mem0',       pos:[ 9, -1, -6], parent:'core', label:'mem0',       tool:'mem0_search · mem0_add' },
   ],
   // delegation: core hands the WHOLE task to this sub-agent, which independently
   // fans out to multiple repos and reports back one consolidated result.
   // Centered on the x=0 axis, directly below core -- not off to one side --
   // so it reads as core's own delegate, not an unrelated satellite.
   delegates: [
-    { id:'delegate-gemini', pos:[0, -2, 0], label:'delegate_gemini', tool:'autonomous multi-repo investigation' },
+    { id:'delegate-gemini', pos:[0, -2, 0], parent:'core', label:'delegate_gemini', tool:'autonomous multi-repo investigation' },
   ],
   repos: [
-    { id:'api-service',    pos:[-4, -7, 4], label:'api-service' },
-    { id:'worker-queue',   pos:[ 4, -7, 4], label:'worker-queue' },
-    { id:'shared-types',   pos:[ 0, -8, -5], label:'shared-types' },
+    { id:'api-service',    pos:[-4, -7, 4], parent:'delegate-gemini', label:'api-service' },
+    { id:'worker-queue',   pos:[ 4, -7, 4], parent:'delegate-gemini', label:'worker-queue' },
+    { id:'shared-types',   pos:[ 0, -8, -5], parent:'delegate-gemini', label:'shared-types' },
   ]
 };
+
+// ---- STEP 1: dynamic orbital position system ----
+// Every non-anchor node (services, delegate-gemini, repos) now also carries an
+// orbit descriptor alongside its static `pos`: { parent, radius, speed, phase,
+// tilt, yOffset }. `pos` is left completely alone for this step -- every node
+// mesh, connector, and pulse still reads the same fixed coordinates it always
+// has, so there's no visual change yet. This step only builds and verifies the
+// machinery that *computes* a live position; steps 2-4 are what actually swap
+// the renderer over to consuming it.
+//
+//   parent  - id of the node this orbits. Resolved through orbitWorldPositions
+//             each frame, so a node can orbit another *moving* node (repos
+//             orbit delegate-gemini, which itself orbits core) without any
+//             special-casing -- see the dependency order in updateOrbits().
+//   radius  - orbit radius in the parent's local xz-plane, before tilt.
+//   speed   - angular velocity in radians/ms (sign sets direction).
+//   phase   - starting angle, radians.
+//   tilt    - rotation of the orbit plane around the local x-axis, radians.
+//             0 = flat horizontal ring around the parent.
+//   yOffset - fixed height offset from the parent, applied after tilt.
+//
+// agent and core are intentionally excluded -- they're the fixed anchors
+// everything else orbits, not orbiting anything themselves.
+//
+// Derived from each node's existing static `pos` relative to its parent's
+// static `pos`, with tilt=0, so computeOrbitPosition(orbit, parentPos, 0)
+// reproduces the original layout exactly. Speeds below are placeholder
+// spacing (slower for repos' shared parent, staggered per sibling so they
+// don't clump) -- step 6 is what actually tunes speed/phase/tilt for feel.
+function orbitFromStaticPos(pos, parentPos, speed, tilt = 0) {
+  const dx = pos[0] - parentPos[0];
+  const dy = pos[1] - parentPos[1];
+  const dz = pos[2] - parentPos[2];
+  return {
+    radius: Math.hypot(dx, dz),
+    phase: Math.atan2(dz, dx),
+    yOffset: dy,
+    speed,
+    tilt,
+  };
+}
+
+// ---- STEP 6: tuned speed/phase for feel ----
+// Phases fall out of each node's original static pos (see orbitFromStaticPos
+// above), and the hand-placed original layout already spreads them well --
+// services land at roughly 24/156/214/326 deg and repos at roughly
+// 45/135/270 deg, gaps of 50-135 deg with nothing bunched together -- so no
+// extra phase offset is layered on top. What the placeholder speeds got
+// wrong was pace: 0.000025 rad/ms read a little brisk for background
+// ambience (~4.2 min/lap) once the outer service ring started sweeping
+// visibly wide arcs. Slowed here so the whole system reads as slow drift,
+// not something worth tracking.
+graph.services.forEach((s, i) => {
+  const dirSign = i % 2 === 0 ? 1 : -1;
+  s.orbit = orbitFromStaticPos(s.pos, graph.core.pos, 0.00002 * dirSign);
+});
+// github/notion share a radius (~9.85), as do cloudflare/mem0 (~10.82) --
+// paired with opposite spin directions, that means each pair traces the
+// SAME circle in opposite directions and sweeps through each other twice
+// per lap. A naive per-pair +-0.6 nudge isn't enough: it only separates each
+// pair from its own twin, not from the OTHER pair, so two nudged radii from
+// different pairs can end up closer together than the orbs are wide, still
+// visibly colliding. Instead, force all four onto strictly separated
+// concentric circles. Spacing must clear each node's outer wireframe shell
+// (radius * 1.45 =~ 0.9, i.e. ~1.8 diameter), not just the solid sphere
+// (~1.24 diameter) -- otherwise the shells still swing through each other
+// even though the solid cores no longer touch.
+const SERVICE_ORBIT_SPACING = 2.5; // > shell diameter (~1.8), safe margin
+// pulled the whole ring in closer to core -- spacing (above) stays fixed so
+// the orbs stay just as collision-safe relative to each other, only their
+// shared distance from the center shrinks.
+const SERVICE_ORBIT_INSET = 3.5;
+const serviceBaseRadius =
+  graph.services.reduce((sum, s) => sum + s.orbit.radius, 0) / graph.services.length
+  - SERVICE_ORBIT_INSET;
+graph.services
+  .slice()
+  .sort((a, b) => a.orbit.radius - b.orbit.radius)
+  .forEach((s, i) => {
+    s.orbit.radius = serviceBaseRadius + (i - 1.5) * SERVICE_ORBIT_SPACING;
+  });
+// mem0 nudged out a touch further still, per request
+const mem0Service = graph.services.find(s => s.id === 'mem0');
+if (mem0Service) mem0Service.orbit.radius += 1.2;
+graph.delegates.forEach(d => {
+  // radius works out to 0 (delegate-gemini sits directly below core in the
+  // static layout, dx=dz=0) so this speed has no visible effect today -- left
+  // slowed in step with the rest in case that ever changes.
+  d.orbit = orbitFromStaticPos(d.pos, graph.core.pos, 0.00001);
+});
+graph.repos.forEach((r, i) => {
+  const delegateGemini = graph.delegates.find(d => d.id === r.parent);
+  const dirSign = i % 2 === 0 ? 1 : -1;
+  // repos sit on a noticeably tighter ring than the services do, so even at
+  // a slower rad/ms they'd still read as the "fast" orbit relative to the
+  // services above -- that's fine, inner moons visibly outpacing outer ones
+  // reads as physically correct rather than chaotic.
+  r.orbit = orbitFromStaticPos(r.pos, delegateGemini.pos, 0.00003 * dirSign);
+  // api-service/worker-queue share a radius (~5.66) around delegate-gemini --
+  // same collision pattern as the services pair above, same fix.
+  r.orbit.radius += dirSign * 0.4;
+});
+
+// world-position cache, recomputed every frame by updateOrbits() below.
+// agent/core are literal constants; everything else is looked up by id.
+// Nothing reads from this yet (that starts in step 2) -- for now it's purely
+// additive machinery, computed and discarded each frame so it can be verified
+// (e.g. via console.log(orbitWorldPositions)) without touching what's drawn.
+const orbitWorldPositions = {
+  agent: new THREE.Vector3(...graph.agent.pos),
+  core: new THREE.Vector3(...graph.core.pos),
+};
+
+// angle = phase + speed * elapsedMs; local xz-circle at that angle, tilted
+// around the local x-axis, offset up/down by yOffset, then placed relative
+// to the parent's CURRENT (possibly itself-orbiting) world position.
+function computeOrbitPosition(orbit, parentPos, elapsedMs) {
+  const angle = orbit.phase + orbit.speed * elapsedMs;
+  const localX = Math.cos(angle) * orbit.radius;
+  const localZ = Math.sin(angle) * orbit.radius;
+  const tiltedY = localZ * Math.sin(orbit.tilt);
+  const tiltedZ = localZ * Math.cos(orbit.tilt);
+  return new THREE.Vector3(
+    parentPos.x + localX,
+    parentPos.y + tiltedY + orbit.yOffset,
+    parentPos.z + tiltedZ
+  );
+}
+
+// recomputes every orbiting node's world position for the given frame time.
+// Order matters: core-orbiting nodes (services, delegate-gemini) can resolve
+// in any order since core is a fixed anchor, but repos orbit delegate-gemini
+// itself, so that loop must run after delegate-gemini's own position has been
+// refreshed this frame -- otherwise repos would trail one frame behind.
+function updateOrbits(nowMs) {
+  const elapsedMs = nowMs - entranceStart;
+  graph.services.forEach(s => {
+    orbitWorldPositions[s.id] = computeOrbitPosition(s.orbit, orbitWorldPositions[s.parent], elapsedMs);
+  });
+  graph.delegates.forEach(d => {
+    orbitWorldPositions[d.id] = computeOrbitPosition(d.orbit, orbitWorldPositions[d.parent], elapsedMs);
+  });
+  graph.repos.forEach(r => {
+    orbitWorldPositions[r.id] = computeOrbitPosition(r.orbit, orbitWorldPositions[r.parent], elapsedMs);
+  });
+}
+
+// ---- STEP 2: wire up parent-relative groups ----
+// Plan offered two options: (a) nest Three.js Groups so children inherit
+// parent transforms automatically, or (b) keep flat groups and manually
+// write each computed world position onto group.position every frame.
+// Going with (b), because step 1 already resolves orbit positions in WORLD
+// space via orbitWorldPositions (parent's live position + tilt/yOffset math),
+// walked in explicit dependency order (services/delegates before repos, so
+// repos never trail delegate-gemini by a frame). Re-deriving that as nested
+// local-space transforms would mean redoing the same per-frame walk AND
+// converting all the tilt math to local space, for no behavioral gain --
+// labels/sprites are still children of each node's group either way, so they
+// ride along with whichever position we write to the group. This function is
+// called from animate(), right after updateOrbits() refreshes the cache.
+function applyOrbitPositions() {
+  graph.services.forEach(s => { const g = nodeGroups[s.id]; if (g) g.position.copy(orbitWorldPositions[s.id]); });
+  graph.delegates.forEach(d => { const g = nodeGroups[d.id]; if (g) g.position.copy(orbitWorldPositions[d.id]); });
+  graph.repos.forEach(r => { const g = nodeGroups[r.id]; if (g) g.position.copy(orbitWorldPositions[r.id]); });
+}
 
 const nodeGroup = new THREE.Group();
 scene.add(nodeGroup);
 
 const nodeMeshes = {}; // id -> mesh, for step 3 pulse targeting
 const lines = [];
+// STEP 3 (fixed): { mesh, shimmerMesh, aId, bId } for every addConnector()
+// call that was given endpoint ids -- repositioned/rescaled live each frame
+// by updateConnectors() below, instead of staying frozen at construction-time
+// static coordinates once nodes start orbiting.
+const connectors = [];
+const CONNECTOR_UP = new THREE.Vector3(0, 1, 0);
 const rotatingShells = []; // { mesh, axis, speed } -- containment shells/rings that spin idly
 
 const nodeGroups = {}; // id -> outer THREE.Group, for entrance-choreography scale-in
@@ -476,11 +651,17 @@ function addConnector(a, b, radius, color, opacity = 0.85, aId, bId) {
   const start = new THREE.Vector3(...a), end = new THREE.Vector3(...b);
   const dir = new THREE.Vector3().subVectors(end, start);
   const length = dir.length();
-  const geo = new THREE.CylinderGeometry(radius, radius, length, 8, 1, true);
+  // Built at unit length along local +Y, then stretched via mesh.scale.y
+  // (here at construction, and every frame after in updateConnectors()).
+  // CylinderGeometry's radius lives in local X/Z, so scaling Y only changes
+  // length -- this avoids rebuilding geometry every tick just to track a
+  // moving endpoint.
+  const geo = new THREE.CylinderGeometry(radius, radius, 1, 8, 1, true);
   const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.copy(start).addScaledVector(dir, 0.5);
-  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  mesh.quaternion.setFromUnitVectors(CONNECTOR_UP, dir.clone().normalize());
+  mesh.scale.y = length;
   nodeGroup.add(mesh);
   lines.push(mesh);
 
@@ -490,7 +671,8 @@ function addConnector(a, b, radius, color, opacity = 0.85, aId, bId) {
   // CylinderGeometry's side UVs run v=0 at local -Y to v=1 at local +Y, and
   // local +Y is what we aim at `dir` (start->end) above, so texture v=0 lines
   // up with `a` and v=1 with `b` -- matches a pulse's frac 0->1 directly.
-  const shimmerGeo = new THREE.CylinderGeometry(radius * 2.2, radius * 2.2, length, 8, 1, true);
+  // Also built at unit length and scaled, same reasoning as the base mesh.
+  const shimmerGeo = new THREE.CylinderGeometry(radius * 2.2, radius * 2.2, 1, 8, 1, true);
   const shimmerTex = getShimmerTexture(color);
   const shimmerMat = new THREE.MeshBasicMaterial({
     map: shimmerTex, color: 0xffffff, transparent: true, opacity: 0,
@@ -499,11 +681,40 @@ function addConnector(a, b, radius, color, opacity = 0.85, aId, bId) {
   const shimmerMesh = new THREE.Mesh(shimmerGeo, shimmerMat);
   shimmerMesh.position.copy(mesh.position);
   shimmerMesh.quaternion.copy(mesh.quaternion);
+  shimmerMesh.scale.y = length;
   nodeGroup.add(shimmerMesh);
   mesh.userData.shimmerMesh = shimmerMesh;
 
-  if (aId && bId) registerConnectorEdge(aId, bId, shimmerMesh);
+  if (aId && bId) {
+    registerConnectorEdge(aId, bId, shimmerMesh);
+    // only trackable endpoints (agent/core/services/delegates/repos all
+    // resolve through orbitWorldPositions) get live-updated; anything built
+    // without ids stays static, same as before this fix.
+    connectors.push({ mesh, shimmerMesh, aId, bId });
+  }
   return mesh;
+}
+
+// STEP 3 (fixed): re-derive every tracked connector's position/orientation/
+// length each frame from live orbitWorldPositions, mirroring the ring
+// approach in applyOrbitRingPositions(). Without this, addConnector's
+// cylinders stay frozen at their construction-time static coordinates while
+// the nodes they link sweep away on their orbits (steps 1-2), visibly
+// detaching the connector from its endpoints. Called from animate(), right
+// after updateOrbits() refreshes the cache.
+function updateConnectors() {
+  connectors.forEach(({ mesh, shimmerMesh, aId, bId }) => {
+    const start = orbitWorldPositions[aId], end = orbitWorldPositions[bId];
+    if (!start || !end) return;
+    const dir = new THREE.Vector3().subVectors(end, start);
+    const length = dir.length();
+    mesh.position.copy(start).addScaledVector(dir, 0.5);
+    mesh.quaternion.setFromUnitVectors(CONNECTOR_UP, dir.normalize());
+    mesh.scale.y = length;
+    shimmerMesh.position.copy(mesh.position);
+    shimmerMesh.quaternion.copy(mesh.quaternion);
+    shimmerMesh.scale.y = length;
+  });
 }
 
 // looked up by spawnPulse so a pulse traveling a registered edge can drive
@@ -706,13 +917,61 @@ graph.services.forEach((s, i) => {
   registerWireEntrance(c, 0.4, ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER + 200);
 });
 
-// ---- STEP 3: orchestration animation ----
-// position lookup by node id, so sequence steps can just say 'from'/'to'
-const nodePositions = { agent: graph.agent.pos, core: graph.core.pos };
-graph.services.forEach(s => nodePositions[s.id] = s.pos);
-graph.delegates.forEach(d => nodePositions[d.id] = d.pos);
-graph.repos.forEach(r => nodePositions[r.id] = r.pos);
+// ---- STEP 5: orbit rings (visual) ----
+// a faint torus traces each child's orbit path around its parent, so the
+// "moon" motion added in steps 1-2 reads as deliberate circular paths rather
+// than nodes just drifting around at random. Reuses the rotatingShells idea
+// (a thin wireframe-ish ring) but these don't spin themselves -- the orbiting
+// node sweeping around the ring IS the motion, so the ring itself stays put
+// (with core) or just tracks its parent's position (with delegate-gemini),
+// never its own extra rotation.
+const orbitRings = []; // { mesh, parentId, yOffset } -- position re-tracked live each frame
 
+function addOrbitRing(parentId, orbit, color, opacity) {
+  const geo = new THREE.TorusGeometry(orbit.radius, 0.012, 6, 64);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity });
+  const mesh = new THREE.Mesh(geo, mat);
+  // TorusGeometry is built normal-to-Z by default; rotate -90 deg about X to
+  // lay it flat in the local xz-plane (matching computeOrbitPosition's flat
+  // localX/localZ circle before tilt), then apply the SAME extra x-rotation
+  // that function applies to tilt the orbit plane. computeOrbitPosition's
+  // tiltedY = localZ*sin(tilt)/tiltedZ = localZ*cos(tilt) is a rotation by
+  // -tilt in the standard right-hand convention, so replicate that here too.
+  mesh.rotation.x = -Math.PI / 2 - orbit.tilt;
+  nodeGroup.add(mesh);
+  orbitRings.push({ mesh, parentId, yOffset: orbit.yOffset });
+}
+
+// dedupe by parent+radius+tilt+yOffset -- several services/repos land on
+// (nearly) the same radius after the collision-spacing pass above, and
+// drawing a duplicate ring on top of an identical one just wastes a draw
+// call for zero visual gain.
+const seenRings = new Set();
+function maybeAddOrbitRing(parentId, orbit, color, opacity) {
+  const key = `${parentId}|${orbit.radius.toFixed(2)}|${orbit.tilt.toFixed(3)}|${orbit.yOffset.toFixed(2)}`;
+  if (seenRings.has(key)) return;
+  seenRings.add(key);
+  addOrbitRing(parentId, orbit, color, opacity);
+}
+
+graph.services.forEach(s => maybeAddOrbitRing('core', s.orbit, COLORS.sage, 0.07));
+graph.delegates.forEach(d => maybeAddOrbitRing('core', d.orbit, COLORS.amber, 0.09));
+graph.repos.forEach(r => maybeAddOrbitRing(r.parent, r.orbit, COLORS.amber, 0.06));
+
+// tracks each ring's position onto its (possibly itself-orbiting) parent's
+// CURRENT world position every frame -- core never moves so those rings are
+// effectively static, but delegate-gemini orbits core, so repo/service rings
+// centered on it have to be re-centered each frame too, same as the nodes
+// themselves in applyOrbitPositions().
+function applyOrbitRingPositions() {
+  orbitRings.forEach(({ mesh, parentId, yOffset }) => {
+    const parentPos = orbitWorldPositions[parentId];
+    if (!parentPos) return;
+    mesh.position.set(parentPos.x, parentPos.y + yOffset, parentPos.z);
+  });
+}
+
+// ---- STEP 3: orchestration animation ----
 // a pulse is a small glowing orb that travels start->end over `duration` ms,
 // then is retired. Independent of the static wire/connector meshes above --
 // those just show the topology; pulses show traffic moving through it.
@@ -741,18 +1000,25 @@ function getTrailTexture(color) {
 }
 
 function spawnPulse(fromId, toId, color, duration = 900) {
-  const from = nodePositions[fromId], to = nodePositions[toId];
+  // STEP 4: pull live world positions from orbitWorldPositions (refreshed
+  // every frame by updateOrbits(), which always runs before spawnPulse is
+  // called from advanceSequencer) instead of the old static graph.*.pos
+  // lookup -- endpoints can be orbiting nodes, so "current position" and
+  // "spawn-time position" are no longer the same thing.
+  const from = orbitWorldPositions[fromId], to = orbitWorldPositions[toId];
   if (!from || !to) return;
   const geo = new THREE.SphereGeometry(0.16, 12, 12);
   const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(...from);
+  mesh.position.copy(from);
   nodeGroup.add(mesh);
 
   // trailing comet streak behind the head, oriented along the travel direction --
-  // sells "data moving through a wire" instead of a ball teleport-lerping through space
-  const fromV = new THREE.Vector3(...from), toV = new THREE.Vector3(...to);
-  const dir = new THREE.Vector3().subVectors(toV, fromV);
+  // sells "data moving through a wire" instead of a ball teleport-lerping through
+  // space. dir/trailLen here are just the initial values for the trail mesh;
+  // updatePulses recomputes both live every frame since a moving endpoint means
+  // the travel direction and segment length can drift mid-flight too.
+  const dir = new THREE.Vector3().subVectors(to, from);
   const segLen = dir.length() || 1;
   dir.normalize();
   const trailLen = Math.min(Math.max(segLen * 0.22, 1.0), 3.2);
@@ -772,9 +1038,10 @@ function spawnPulse(fromId, toId, color, duration = 900) {
 
   activePulses.push({
     mesh, trailMesh, dir, trailLen,
-    from: fromV,
-    to: toV,
-    toId,
+    // fromId/toId (not frozen from/to Vector3s) -- updatePulses looks up
+    // orbitWorldPositions[fromId/toId] live on every tick so a pulse still
+    // lands on a moving target instead of the spot it started at.
+    fromId, toId,
     t: 0,
     duration,
     shimmerMesh: edge ? edge.mesh : null,
@@ -788,9 +1055,26 @@ function updatePulses(deltaMs) {
     p.t += deltaMs;
     const frac = Math.min(p.t / p.duration, 1);
     const eased = frac < 0.5 ? 2 * frac * frac : -1 + (4 - 2 * frac) * frac; // easeInOutQuad
-    p.mesh.position.lerpVectors(p.from, p.to, eased);
+
+    // STEP 4: re-fetch live endpoint positions every tick instead of lerping
+    // between vectors frozen at spawn time. orbitWorldPositions is refreshed
+    // by updateOrbits() earlier in the same animate() frame, so this always
+    // reflects where the endpoints are RIGHT NOW, not where they were when
+    // the pulse launched -- a pulse to an orbiting node lands on it instead
+    // of the stale spot it started orbiting away from.
+    const from = orbitWorldPositions[p.fromId], to = orbitWorldPositions[p.toId];
+    p.mesh.position.lerpVectors(from, to, eased);
     const fadeOpacity = frac > 0.85 ? Math.max(0, 1 - (frac - 0.85) / 0.15) : 1;
     p.mesh.material.opacity = fadeOpacity;
+
+    // dir/trailLen are also re-derived live: with orbiting endpoints, both
+    // the travel direction and the distance between them can drift mid-flight,
+    // so freezing either at spawn would leave the trail pointing/sized wrong
+    // by the time the pulse arrives.
+    p.dir.subVectors(to, from);
+    const liveSegLen = p.dir.length() || 1;
+    p.dir.normalize();
+    p.trailLen = Math.min(Math.max(liveSegLen * 0.22, 1.0), 3.2);
 
     // trail grows in over the first ~12% of travel so it doesn't pop to full
     // length instantly, then tracks the head and fades out together with it
@@ -798,6 +1082,7 @@ function updatePulses(deltaMs) {
     const curLen = p.trailLen * growIn;
     p.trailMesh.scale.set(curLen, 1, 1);
     p.trailMesh.position.copy(p.mesh.position).addScaledVector(p.dir, -curLen / 2);
+    p.trailMesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), p.dir);
     p.trailMesh.material.opacity = 0.9 * fadeOpacity * growIn;
 
     // wire shimmer: brighten a band on the connector cylinder at the same
@@ -1016,8 +1301,14 @@ let isDragging = false, prevX = 0, prevY = 0;
 // repo leaves at bottom) doesn't fit at the desktop default distance --
 // start further back so nothing is cropped before the user zooms manually.
 const isNarrow = window.innerWidth < 640;
-let theta = 0.35, phi = 1.15, radius = isNarrow ? 34 : 26; // spherical coords around origin
-const MIN_RADIUS = isNarrow ? 20 : 14, MAX_RADIUS = isNarrow ? 46 : 42;
+// STEP 6: all three distances bumped a bit from their pre-orbit values
+// (26/34 default, 14-42/20-46 range) -- the service ring's outermost orbit
+// (mem0, ~11.8 units from core, see the fog comment above) plus its glow
+// sprite was sitting right at the edge of frame at the old default distance,
+// so there's now a bit more breathing room at every zoom level rather than
+// requiring the user to manually zoom out to see the full sweep.
+let theta = 0.35, phi = 1.15, radius = isNarrow ? 36 : 28; // spherical coords around origin
+const MIN_RADIUS = isNarrow ? 21 : 15, MAX_RADIUS = isNarrow ? 49 : 45;
 function updateCamera() {
   camera.position.x = radius * Math.sin(phi) * Math.sin(theta);
   camera.position.z = radius * Math.sin(phi) * Math.cos(theta);
@@ -1095,6 +1386,10 @@ function animate(now) {
   lastFrameTime = now;
 
   updateEntrance(now);
+  updateOrbits(now); // STEP 1: computes orbitWorldPositions each frame
+  applyOrbitPositions(); // STEP 2: pushes those positions onto the node groups -- this is what actually moves them
+  updateConnectors(); // STEP 3: re-stretches/repositions connector cylinders onto live (possibly orbiting) endpoints
+  applyOrbitRingPositions(); // STEP 5: keeps orbit-path rings centered on their (possibly moving) parent
 
   if (!isDragging && !reducedMotion) {
     idleSpin += 0.0009;
