@@ -527,27 +527,37 @@ graph.repos.forEach((r, i) => {
   r.orbit.radius *= REPO_ORBIT_SCALE;
 });
 
-// STEP 2 (gap-fill): designerPhases orbit delegate-designer, same generic
-// treatment as repos orbiting delegate-gemini -- looked up by each phase's
-// own `parent` id so this stays independent of which delegate it belongs to.
-// pulled the generate/validate/fix sub-orbs in closer to delegate-designer --
-// the original static-pos-derived radii (~2.8/2.8/4) read a bit too spread
-// out for a compact bounded loop. Scaled down post-hoc rather than moving the
-// static positions themselves, so phase/yOffset and the maybeAddOrbitRing
-// dedupe key are untouched.
-// STEP 2 (delegate-reposition-plan) check: this offset is derived once from
-// the two STATIC layout positions (orbitFromStaticPos), then re-applied atop
-// whatever the parent's LIVE position is every frame -- it was never coupled
-// to delegate_designer's old below-core spot, so it rode along automatically
-// when Step 1 moved the parent ring to yOffset +3. updateOrbits() also
-// resolves graph.delegates before this loop runs, so the parent position read
-// here is always this frame's, never a stale one -- no lag/detachment.
-const DESIGNER_PHASE_ORBIT_SCALE = 0.7;
+// STEP 2 (gap-fill), STEP 2 (delegate-reposition-plan): history -- designerPhases
+// used to derive each phase's own orbit individually from its static pos
+// relative to delegate-designer (radii ~2.8/2.8/4, scaled by 0.7), which rode
+// along automatically when the parent ring moved (delegate-reposition-plan)
+// since the offset was re-applied atop the parent's LIVE position every frame.
+// STEP 1 (sub-orb-ring-unification): now replaced with one shared fixed
+// radius/yOffset/speed for all 3 phases, evenly spaced 120 deg apart, instead
+// of each deriving its own from static pos -- mirrors the pattern already used
+// for the top-tier delegate/service rings (DELEGATE_RING_RADIUS etc. above).
+// Radius/yOffset chosen close to the old individually-derived range
+// (~2.0-2.8 radius, -2/-3 yOffset) so the footprint doesn't jump visually.
+// Speed is a single shared positive value (no more per-sibling dirSign
+// alternation) since a coherent ring needs uniform angular speed for its
+// members' relative phase spacing to stay constant over time -- this is what
+// lets maybeAddOrbitRing's existing dedupe key (parentId+radius+tilt+yOffset)
+// collapse all 3 phases onto a single shared ring mesh around delegate-designer,
+// same as delegate_designer/delegate_research already share one ring around
+// core. Resolution order is unchanged: updateOrbits() still resolves
+// graph.delegates before this loop, so the parent position read here is
+// always this frame's, never stale. See docs/sub-orb-ring-unification-proposal.md.
+const DESIGNER_PHASE_RING_RADIUS = 2.2;
+const DESIGNER_PHASE_RING_Y_OFFSET = -2.7;
+const DESIGNER_PHASE_RING_SPEED = 0.000025;
 graph.designerPhases.forEach((p, i) => {
-  const parentDelegate = graph.delegates.find(d => d.id === p.parent);
-  const dirSign = i % 2 === 0 ? 1 : -1;
-  p.orbit = orbitFromStaticPos(p.pos, parentDelegate.pos, 0.000025 * dirSign);
-  p.orbit.radius *= DESIGNER_PHASE_ORBIT_SCALE;
+  p.orbit = {
+    radius: DESIGNER_PHASE_RING_RADIUS,
+    phase: (i / graph.designerPhases.length) * Math.PI * 2,
+    yOffset: DESIGNER_PHASE_RING_Y_OFFSET,
+    speed: DESIGNER_PHASE_RING_SPEED,
+    tilt: 0,
+  };
 });
 
 // STEP 4: researchModes orbit delegate-research, same generic treatment as
