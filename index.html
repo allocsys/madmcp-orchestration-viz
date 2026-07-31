@@ -371,7 +371,7 @@ const graph = {
   // Centered on the x=0 axis, directly below core -- not off to one side --
   // so it reads as core's own delegate, not an unrelated satellite.
   delegates: [
-    { id:'delegate-gemini', pos:[0, -2, 0], parent:'core', label:'delegate_gemini', tool:'autonomous multi-repo investigation' },
+    { id:'delegate-gemini', pos:[0, -2, 0], parent:'core', label:'delegate_agent', tool:'autonomous multi-repo investigation' },
     { id:'delegate-designer', pos:[-7, -3, 3], parent:'core', label:'delegate_designer', tool:'bounded loop: generate -> validate -> fix', shape:'designer' },
     { id:'delegate-research', pos:[7, -3, -3], parent:'core', label:'delegate_research', tool:'web-only: precision (gemini) or wide (exa)', shape:'research' },
   ],
@@ -1553,7 +1553,7 @@ const sequence = [
   { pulses: [{ from: 'delegate-research', to: 'core' }], kind: 'return',
     msg: '<span class="fn">delegate_research</span> -&gt; core: research result' },
   { pulses: [{ from: 'core', to: 'delegate-gemini' }], kind: 'delegate',
-    msg: 'core -&gt; <span class="fn">delegate_gemini</span>: handoff (autonomous)' },
+    msg: 'core -&gt; <span class="fn">delegate_agent</span>: handoff (autonomous)' },
   { pulses: [
       { from: 'delegate-gemini', to: 'api-service' },
       { from: 'delegate-gemini', to: 'worker-queue' },
@@ -1565,7 +1565,7 @@ const sequence = [
       { from: 'delegate-gemini', to: 'mem0' },
       { from: 'delegate-gemini', to: 'context7' },
     ], kind: 'fanout',
-    msg: '<span class="fn">delegate_gemini</span> fans out to 9 targets in parallel' },
+    msg: '<span class="fn">delegate_agent</span> fans out to 10 targets in parallel' },
   { pulses: [
       { from: 'api-service', to: 'delegate-gemini' },
       { from: 'worker-queue', to: 'delegate-gemini' },
@@ -1577,9 +1577,9 @@ const sequence = [
       { from: 'mem0', to: 'delegate-gemini' },
       { from: 'context7', to: 'delegate-gemini' },
     ], kind: 'return',
-    msg: '9 targets -&gt; <span class="fn">delegate_gemini</span>: results returned' },
+    msg: '10 targets -&gt; <span class="fn">delegate_agent</span>: results returned' },
   { pulses: [{ from: 'delegate-gemini', to: 'core' }], kind: 'return',
-    msg: '<span class="fn">delegate_gemini</span> -&gt; core: consolidated result' },
+    msg: '<span class="fn">delegate_agent</span> -&gt; core: consolidated result' },
   { pulses: [{ from: 'core', to: 'agent' }], kind: 'return',
     msg: 'core -&gt; agent: synthesized answer returned' },
 ];
