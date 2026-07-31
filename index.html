@@ -1167,8 +1167,10 @@ addNode('agent', graph.agent.pos, graph.agent.r, graph.agent.color, 'agent');
 addNode('core', graph.core.pos, graph.core.r, graph.core.color, 'madmcp');
 registerNodeEntrance('agent', ENTRANCE_PHASE.agent);
 registerNodeEntrance('core', ENTRANCE_PHASE.core);
-const agentCoreWire = addConnector(graph.agent.pos, graph.core.pos, 0.045, COLORS.wire, 0.6, 'agent', 'core');
-registerWireEntrance(agentCoreWire, 0.6, ENTRANCE_PHASE.core + 150);
+// agent<->core static connector removed per request -- the 'agent dispatches
+// task' / 'core -> agent: synthesized answer' pulses still travel this edge
+// fine via orbitWorldPositions.agent/core, which are set as fixed anchors
+// regardless of any connector mesh.
 
 // STEP 6: gate sits just outside core's own glow (core.r=1.0, glow scale
 // core.r*5.2). STEP 3 (ring-restructure) check: at radius core.r+1.4=2.4,
@@ -1205,11 +1207,9 @@ graph.services.forEach((s, i) => {
   // (p.shimmerMesh)` guard there). Only the telemetry connector
   // (core -> cloudflare-observability) is kept, since that one wasn't a
   // "direct" line to begin with.
-  const isTelemetry = s.id === 'cloudflare-observability';
-  if (isTelemetry) {
-    const w = addConnector(graph.core.pos, s.pos, 0.02, s.color || COLORS.wire, 0.3, 'core', s.id);
-    registerWireEntrance(w, 0.3, delay + 130);
-  }
+  // telemetry connector (core -> cloudflare-observability) also removed now
+  // per request -- same reasoning as the direct-call lines above, the
+  // 'telemetry' pulse still travels this edge fine.
 });
 
 // STEP 5 (gap-fill): sync_mem0_to_notion is a real cross-service orchestration
@@ -1222,8 +1222,9 @@ graph.services.forEach((s, i) => {
 // it keeps tracking both nodes as they orbit core independently of each other.
 const mem0SyncNode = graph.services.find(s => s.id === 'mem0');
 const notionSyncNode = graph.services.find(s => s.id === 'notion');
-const mem0NotionSyncWire = addConnector(mem0SyncNode.pos, notionSyncNode.pos, 0.03, COLORS.rose, 0.55, 'mem0', 'notion');
-registerWireEntrance(mem0NotionSyncWire, 0.55, ENTRANCE_PHASE.services + graph.services.length * ENTRANCE_STAGGER + 200);
+// static mem0<->notion sync connector removed per request -- the
+// 'sync_mem0_to_notion' pulse still travels this edge fine via each node's
+// live orbitWorldPositions entry.
 
 // core -> delegate-gemini (DELEGATION — solid amber connector, thicker than a
 // direct-call wire since it's a heavier relationship: a handoff, not a ping)
@@ -1236,9 +1237,8 @@ graph.delegates.forEach(d => {
     addDelegateNode(d.id, d.pos, d.label, d.tool);
   }
   registerNodeEntrance(d.id, ENTRANCE_PHASE.delegate);
-  const connectorColor = d.shape === 'designer' ? COLORS.violet : d.shape === 'research' ? COLORS.sky : COLORS.amber;
-  const c = addConnector(graph.core.pos, d.pos, 0.05, connectorColor, 0.85, 'core', d.id);
-  registerWireEntrance(c, 0.85, ENTRANCE_PHASE.delegate + 130);
+  // core -> delegate connector removed per request -- the 'handoff' pulses
+  // still travel these edges fine via orbitWorldPositions.
 });
 
 // delegate-gemini -> repo leaves (the sub-agent's OWN fan-out, not core's)
@@ -1247,16 +1247,14 @@ graph.repos.forEach((r, i) => {
   addNode(r.id, r.pos, 0.32, 0x8CA3BD, r.label);
   const delay = ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER;
   registerNodeEntrance(r.id, delay);
-  const c = addConnector(delegateGemini.pos, r.pos, 0.03, COLORS.amber, 0.55, delegateGemini.id, r.id);
-  registerWireEntrance(c, 0.55, delay + 130);
+  // delegate_agent -> repo connector removed per request -- the fanout/
+  // return pulses still travel these edges fine via orbitWorldPositions.
 });
 
-// delegate-gemini -> services too -- it isn't limited to repos, it can read
-// across any connected module (github, notion, cloudflare, mem0) once dispatched
-graph.services.forEach((s, i) => {
-  const c = addConnector(delegateGemini.pos, s.pos, 0.025, COLORS.amber, 0.4, delegateGemini.id, s.id);
-  registerWireEntrance(c, 0.4, ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER + 200);
-});
+// delegate-gemini -> services: connector removed per request -- delegate_agent
+// isn't limited to repos, it can read across any connected module too, and
+// the fanout/return pulses to/from those services still travel fine via
+// orbitWorldPositions with no static wire behind them.
 
 // STEP 2 (gap-fill): delegate_designer -> its own phase nodes
 // (generate/validate/fix) -- a bounded internal loop, not an open fan-out
@@ -1266,8 +1264,9 @@ graph.designerPhases.forEach((p, i) => {
   addNode(p.id, p.pos, 0.28, COLORS.violet, p.label);
   const delay = ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER;
   registerNodeEntrance(p.id, delay);
-  const c = addConnector(delegateDesigner.pos, p.pos, 0.028, COLORS.violet, 0.5, delegateDesigner.id, p.id);
-  registerWireEntrance(c, 0.5, delay + 130);
+  // delegate_designer -> phase connector removed per request -- the loop
+  // pulses (generate->validate->fix->regenerate) still travel these edges
+  // fine via orbitWorldPositions.
 });
 
 // STEP 4: delegate_research -> precision/wide mode nodes. Unlike
@@ -1283,8 +1282,9 @@ graph.researchModes.forEach((m, i) => {
   addNode(m.id, m.pos, 0.28, modeColor, m.label, m.tool);
   const delay = ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER;
   registerNodeEntrance(m.id, delay);
-  const c = addConnector(delegateResearch.pos, m.pos, 0.028, modeColor, 0.5, delegateResearch.id, m.id);
-  registerWireEntrance(c, 0.5, delay + 130);
+  // delegate_research -> mode connector removed per request -- the
+  // research-precision/research-wide/return pulses still travel these edges
+  // fine via orbitWorldPositions.
 });
 
 // ---- STEP 5: orbit rings (visual) ----
