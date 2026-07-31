@@ -525,10 +525,14 @@ graph.designerPhases.forEach((p, i) => {
 
 // STEP 4: researchModes orbit delegate-research, same generic treatment as
 // designerPhases orbiting delegate-designer.
+// pulled precision/wide in closer to delegate-research, same scale-after-
+// orbitFromStaticPos pattern used for the designer sub-orbs and repos above.
+const RESEARCH_MODE_ORBIT_SCALE = 0.5;
 graph.researchModes.forEach((m, i) => {
   const parentDelegate = graph.delegates.find(d => d.id === m.parent);
   const dirSign = i % 2 === 0 ? 1 : -1;
   m.orbit = orbitFromStaticPos(m.pos, parentDelegate.pos, 0.000025 * dirSign);
+  m.orbit.radius *= RESEARCH_MODE_ORBIT_SCALE;
 });
 
 // world-position cache, recomputed every frame by updateOrbits() below.
