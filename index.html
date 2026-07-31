@@ -557,7 +557,7 @@ graph.repos.forEach((r, i) => {
 // graph.delegates before this loop, so the parent position read here is
 // always this frame's, never stale. See docs/sub-orb-ring-unification-proposal.md.
 const DESIGNER_PHASE_RING_RADIUS = 2.2;
-const DESIGNER_PHASE_RING_Y_OFFSET = -1.2; // brought up from -2.7 -- sat too far below delegate_designer visually
+const DESIGNER_PHASE_RING_Y_OFFSET = -0.4; // brought up further from -1.2 -- still reading a bit low below delegate_designer
 const DESIGNER_PHASE_RING_SPEED = 0.000025;
 graph.designerPhases.forEach((p, i) => {
   p.orbit = {
@@ -589,7 +589,7 @@ graph.designerPhases.forEach((p, i) => {
 // same check as designerPhases and the delegate-reposition-plan already
 // covered. See docs/sub-orb-ring-unification-proposal.md.
 const RESEARCH_MODE_RING_RADIUS = 2.0;
-const RESEARCH_MODE_RING_Y_OFFSET = -2.0; // brought up from -3.5 -- sat too far below delegate_research visually
+const RESEARCH_MODE_RING_Y_OFFSET = -1.0; // brought up further from -2.0 -- still reading a bit low below delegate_research
 const RESEARCH_MODE_RING_SPEED = 0.000025;
 graph.researchModes.forEach((m, i) => {
   m.orbit = {
