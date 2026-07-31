@@ -490,7 +490,7 @@ graph.services.forEach((s, i) => {
 // regardless of yOffset. Revisit radius in Step 3 if the new position reads
 // as crowding either neighbor once checked visually.
 const DELEGATE_RING_RADIUS = 7.5; // unchanged -- still well clear of the agent-core connector at any yOffset, see note above
-const DELEGATE_RING_SPEED = 0.000015; // shared pace, distinct from (slightly faster than) delegate_agent's near-static speed below
+const DELEGATE_RING_SPEED = -0.000015; // negated to reverse orbit direction (counter-clockwise) -- same pace as before, magnitude unchanged, distinct from delegate_agent's near-static speed below
 const DELEGATE_RING_Y_OFFSET = 3; // moved from -7 (below core) to +3, placing the ring at world y=7 -- between core's y(4) and agent's y(9)
 const boundedDelegates = graph.delegates.filter(d => d.id !== 'delegate-gemini');
 boundedDelegates.forEach((d, i) => {
