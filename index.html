@@ -508,23 +508,32 @@ boundedDelegates.forEach((d, i) => {
 // effect today -- left slowed in step with the rest in case that ever changes.
 const delegateGeminiNode = graph.delegates.find(d => d.id === 'delegate-gemini');
 delegateGeminiNode.orbit = orbitFromStaticPos(delegateGeminiNode.pos, graph.core.pos, 0.00001);
-// pulled api-service/worker-queue/shared-types in closer to delegate_agent --
-// halved post-collision-fix, same scale-after-adjust pattern used for the
-// designer sub-orbs above, so the +-0.4 collision spacing between
-// api-service/worker-queue still holds proportionally.
-const REPO_ORBIT_SCALE = 0.5;
+// STEP 3 (sub-orb-ring-unification): api-service/worker-queue/shared-types
+// now share one fixed radius/yOffset/speed, evenly spaced 120 deg apart,
+// instead of each deriving its own radius/yOffset from its static pos
+// relative to delegate-gemini (previously via orbitFromStaticPos, a +-0.4
+// collision offset between api-service/worker-queue, then REPO_ORBIT_SCALE).
+// Radius/yOffset are the average of the old individually-derived values
+// (radius ~2.63-3.03, yOffset -5/-5/-6), so the ring's height and reach read
+// essentially unchanged -- just unified into one shared ring instead of the
+// old near-miss pair-plus-outlier. Speed is a single shared positive value
+// (no more per-sibling dirSign) so the three nodes' relative phase spacing
+// stays constant over time -- same reasoning as designerPhases/researchModes
+// above. This lets maybeAddOrbitRing's dedupe key (parentId+radius+tilt+
+// yOffset) collapse all 3 repos onto one shared ring mesh around
+// delegate-gemini, same as the other two sub-orb groups already do around
+// their own delegates.
+const REPO_RING_RADIUS = 2.8;
+const REPO_RING_Y_OFFSET = -5.3;
+const REPO_RING_SPEED = 0.00003;
 graph.repos.forEach((r, i) => {
-  const delegateGemini = graph.delegates.find(d => d.id === r.parent);
-  const dirSign = i % 2 === 0 ? 1 : -1;
-  // repos sit on a noticeably tighter ring than the services do, so even at
-  // a slower rad/ms they'd still read as the "fast" orbit relative to the
-  // services above -- that's fine, inner moons visibly outpacing outer ones
-  // reads as physically correct rather than chaotic.
-  r.orbit = orbitFromStaticPos(r.pos, delegateGemini.pos, 0.00003 * dirSign);
-  // api-service/worker-queue share a radius (~5.66) around delegate-gemini --
-  // same collision pattern as the services pair above, same fix.
-  r.orbit.radius += dirSign * 0.4;
-  r.orbit.radius *= REPO_ORBIT_SCALE;
+  r.orbit = {
+    radius: REPO_RING_RADIUS,
+    phase: (i / graph.repos.length) * Math.PI * 2,
+    yOffset: REPO_RING_Y_OFFSET,
+    speed: REPO_RING_SPEED,
+    tilt: 0,
+  };
 });
 
 // STEP 2 (gap-fill), STEP 2 (delegate-reposition-plan): history -- designerPhases
