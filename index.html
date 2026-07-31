@@ -474,16 +474,24 @@ graph.services.forEach((s, i) => {
   };
 });
 // STEP 2 (ring-restructure): inner bounded-delegate ring -- delegate_designer
-// and delegate_research now share one fixed radius, closer to core than the
-// STEP 1 outer service ring (10.5), evenly spaced 180 deg apart instead of
-// each computing its own radius/phase from its old hand-placed static pos.
-// delegate_agent is explicitly excluded (per plan: it's a fixed satellite
-// directly under core, not part of either ring, since it's mechanically
-// different -- open fan-out vs. the two bounded loops) and keeps its exact
-// prior orbit untouched below.
-const DELEGATE_RING_RADIUS = 7.5; // inside the 10.5 outer service ring, roughly matching the two delegates' old individual radii (~7.6) so the visual footprint doesn't jump
+// and delegate_research now share one fixed radius, evenly spaced 180 deg
+// apart instead of each computing its own radius/phase from its old
+// hand-placed static pos. delegate_agent is explicitly excluded (per plan:
+// it's a fixed satellite directly under core, not part of either ring,
+// since it's mechanically different -- open fan-out vs. the two bounded
+// loops) and keeps its exact prior orbit untouched below.
+// STEP 1 (delegate-reposition-plan): moved this ring from below core
+// (yOffset -7) to between core (y=4) and agent (y=9). yOffset +3 puts the
+// ring's center at world y=7 -- roughly two-thirds of the way from core to
+// agent, clear of core's glow/security gate below and short of agent's node
+// above. Radius and speed left unchanged from the ring-restructure plan:
+// still well clear of the agent-core connector (which runs straight up the
+// x=0/z=0 axis) since the ring's xz-radius keeps both delegates off-axis
+// regardless of yOffset. Revisit radius in Step 3 if the new position reads
+// as crowding either neighbor once checked visually.
+const DELEGATE_RING_RADIUS = 7.5; // unchanged -- still well clear of the agent-core connector at any yOffset, see note above
 const DELEGATE_RING_SPEED = 0.000015; // shared pace, distinct from (slightly faster than) delegate_agent's near-static speed below
-const DELEGATE_RING_Y_OFFSET = -7; // matches both delegates' original y(-3) relative to core's y(4)
+const DELEGATE_RING_Y_OFFSET = 3; // moved from -7 (below core) to +3, placing the ring at world y=7 -- between core's y(4) and agent's y(9)
 const boundedDelegates = graph.delegates.filter(d => d.id !== 'delegate-gemini');
 boundedDelegates.forEach((d, i) => {
   d.orbit = {
