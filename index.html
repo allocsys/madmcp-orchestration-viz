@@ -525,7 +525,7 @@ delegateGeminiNode.orbit = orbitFromStaticPos(delegateGeminiNode.pos, graph.core
 // their own delegates.
 const REPO_RING_RADIUS = 2.8;
 const REPO_RING_Y_OFFSET = -5.3;
-const REPO_RING_SPEED = 0.00003;
+const REPO_RING_SPEED = 0.00006; // doubled from 0.00003 -- sub-orbs read too slow/static
 graph.repos.forEach((r, i) => {
   r.orbit = {
     radius: REPO_RING_RADIUS,
@@ -558,7 +558,7 @@ graph.repos.forEach((r, i) => {
 // always this frame's, never stale. See docs/sub-orb-ring-unification-proposal.md.
 const DESIGNER_PHASE_RING_RADIUS = 2.2;
 const DESIGNER_PHASE_RING_Y_OFFSET = 0.4; // brought up further from -0.4 -- still reading a bit low below delegate_designer
-const DESIGNER_PHASE_RING_SPEED = 0.000025;
+const DESIGNER_PHASE_RING_SPEED = 0.00005; // doubled from 0.000025 -- sub-orbs read too slow/static
 graph.designerPhases.forEach((p, i) => {
   p.orbit = {
     radius: DESIGNER_PHASE_RING_RADIUS,
@@ -590,7 +590,7 @@ graph.designerPhases.forEach((p, i) => {
 // covered. See docs/sub-orb-ring-unification-proposal.md.
 const RESEARCH_MODE_RING_RADIUS = 2.0;
 const RESEARCH_MODE_RING_Y_OFFSET = -0.1; // brought up further from -1.0 -- still reading a bit low below delegate_research
-const RESEARCH_MODE_RING_SPEED = 0.000025;
+const RESEARCH_MODE_RING_SPEED = 0.00005; // doubled from 0.000025 -- sub-orbs read too slow/static
 graph.researchModes.forEach((m, i) => {
   m.orbit = {
     radius: RESEARCH_MODE_RING_RADIUS,
