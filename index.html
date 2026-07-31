@@ -15,6 +15,7 @@
     --amber:#F2A65A;
     --sage:#6FCF97;
     --violet:#C792EA;
+    --sky:#5AC8E8;
     --text:#E8EDF2;
     --muted:#7C8798;
   }
@@ -83,6 +84,7 @@
   #legend .row{display:flex; align-items:center; justify-content:flex-end; gap:8px;}
   #legend .dot{width:8px; height:8px; border-radius:50%; flex:none;}
   #legend .dot.direct{background:var(--sage);}
+  #legend .dot.telemetry{background:var(--sky); box-shadow:0 0 4px var(--sky);}
   #legend .dot.delegate{background:var(--amber); box-shadow:0 0 6px var(--amber);}
   #legend .dot.loop{background:var(--violet); box-shadow:0 0 6px var(--violet);}
   #legend .caption{color:var(--muted); opacity:0.75; font-size:10px; margin-top:6px; max-width:220px;}
@@ -107,14 +109,15 @@
 
 <div id="legend" aria-hidden="true">
   <div class="row"><span>direct call</span><span class="dot direct"></span></div>
+  <div class="row"><span>telemetry (read-only)</span><span class="dot telemetry"></span></div>
   <div class="row"><span>delegation</span><span class="dot delegate"></span></div>
   <div class="row"><span>bounded loop</span><span class="dot loop"></span></div>
-  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result. a bounded loop (delegate_designer) cycles through a fixed generate &#8594; validate &#8594; fix sequence instead of fanning out.</div>
+  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result. a bounded loop (delegate_designer) cycles through a fixed generate &#8594; validate &#8594; fix sequence instead of fanning out. cloudflare is split into control-plane calls (manage workers/d1/r2/hyperdrive) and read-only telemetry querying, shown as a thinner, dimmer line.</div>
 </div>
 
 <div id="ticker" aria-live="polite">
   <div class="line">&gt; system ready — <span class="fn">madmcp</span> core online</div>
-  <div class="line">&gt; direct calls: github · notion · cloudflare · mem0 · context7</div>
+  <div class="line">&gt; direct calls: github · notion · cloudflare · cf-observability · mem0 · context7</div>
   <div class="line active">&gt; awaiting orchestration sequence…</div>
 </div>
 
@@ -145,6 +148,7 @@ const COLORS = {
   sage: 0x6FCF97,
   text: 0xE8EDF2,
   violet: 0xC792EA,
+  sky: 0x5AC8E8,
 };
 
 // ---- renderer / scene / camera ----
@@ -353,7 +357,8 @@ const graph = {
   services: [
     { id:'github',    pos:[-9, -1,  4], parent:'core', label:'github',     tool:'create_repo · get_pull_requests · search_code' },
     { id:'notion',     pos:[ 9, -1,  4], parent:'core', label:'notion',     tool:'notion_search · notion_query_database' },
-    { id:'cloudflare', pos:[-9, -1, -6], parent:'core', label:'cloudflare', tool:'cf_workers_list · cf_d1_database_query' },
+    { id:'cloudflare', pos:[-9, -1, -6], parent:'core', label:'cloudflare', tool:'cf_workers_list · cf_d1_database_query · manage' },
+    { id:'cloudflare-observability', pos:[-4, -1, -9], parent:'core', label:'cf-observability', tool:'cf_workers_observability_query · keys · values · compare', color: COLORS.sky },
     { id:'mem0',       pos:[ 9, -1, -6], parent:'core', label:'mem0',       tool:'mem0_search · mem0_add' },
     { id:'context7',   pos:[ 0, -1,  9], parent:'core', label:'context7',   tool:'get_library_docs · search_library' },
   ],
@@ -963,12 +968,16 @@ graph.services.forEach((s, i) => {
   if (s.id === 'github') {
     addGithubNode(s.id, s.pos, s.label, s.tool);
   } else {
-    addNode(s.id, s.pos, 0.62, COLORS.sage, s.label, s.tool);
+    addNode(s.id, s.pos, 0.62, s.color || COLORS.sage, s.label, s.tool);
   }
   const delay = ENTRANCE_PHASE.services + i * ENTRANCE_STAGGER;
   registerNodeEntrance(s.id, delay);
-  const w = addConnector(graph.core.pos, s.pos, 0.035, COLORS.wire, 0.45, 'core', s.id);
-  registerWireEntrance(w, 0.45, delay + 130);
+  // STEP 3 (gap-fill): telemetry/observability calls get a visibly thinner,
+  // dimmer, sky-colored connector vs. management/write calls -- read-only
+  // querying shouldn't look as "heavy" on the wire as a control-plane action.
+  const isTelemetry = s.id === 'cloudflare-observability';
+  const w = addConnector(graph.core.pos, s.pos, isTelemetry ? 0.02 : 0.035, s.color || COLORS.wire, isTelemetry ? 0.3 : 0.45, 'core', s.id);
+  registerWireEntrance(w, isTelemetry ? 0.3 : 0.45, delay + 130);
 });
 
 // core -> delegate-gemini (DELEGATION — solid amber connector, thicker than a
@@ -1051,7 +1060,7 @@ function maybeAddOrbitRing(parentId, orbit, color, opacity) {
   addOrbitRing(parentId, orbit, color, opacity);
 }
 
-graph.services.forEach(s => maybeAddOrbitRing('core', s.orbit, COLORS.sage, 0.07));
+graph.services.forEach(s => maybeAddOrbitRing('core', s.orbit, s.color || COLORS.sage, 0.07));
 graph.delegates.forEach(d => {
   const ringColor = d.shape === 'designer' ? COLORS.violet : COLORS.amber;
   maybeAddOrbitRing('core', d.orbit, ringColor, 0.09);
@@ -1333,7 +1342,9 @@ const sequence = [
   { pulses: [{ from: 'core', to: 'notion' }], kind: 'direct',
     msg: 'core -&gt; <span class="fn">notion</span>: direct call' },
   { pulses: [{ from: 'core', to: 'cloudflare' }], kind: 'direct',
-    msg: 'core -&gt; <span class="fn">cloudflare</span>: direct call' },
+    msg: 'core -&gt; <span class="fn">cloudflare</span>: direct call (manage)' },
+  { pulses: [{ from: 'core', to: 'cloudflare-observability' }], kind: 'telemetry',
+    msg: 'core -&gt; <span class="fn">cf-observability</span>: telemetry query' },
   { pulses: [{ from: 'core', to: 'mem0' }], kind: 'direct',
     msg: 'core -&gt; <span class="fn">mem0</span>: direct call' },
   { pulses: [{ from: 'core', to: 'context7' }], kind: 'direct',
@@ -1359,10 +1370,11 @@ const sequence = [
       { from: 'delegate-gemini', to: 'github' },
       { from: 'delegate-gemini', to: 'notion' },
       { from: 'delegate-gemini', to: 'cloudflare' },
+      { from: 'delegate-gemini', to: 'cloudflare-observability' },
       { from: 'delegate-gemini', to: 'mem0' },
       { from: 'delegate-gemini', to: 'context7' },
     ], kind: 'fanout',
-    msg: '<span class="fn">delegate_gemini</span> fans out to 8 targets in parallel' },
+    msg: '<span class="fn">delegate_gemini</span> fans out to 9 targets in parallel' },
   { pulses: [
       { from: 'api-service', to: 'delegate-gemini' },
       { from: 'worker-queue', to: 'delegate-gemini' },
@@ -1370,16 +1382,17 @@ const sequence = [
       { from: 'github', to: 'delegate-gemini' },
       { from: 'notion', to: 'delegate-gemini' },
       { from: 'cloudflare', to: 'delegate-gemini' },
+      { from: 'cloudflare-observability', to: 'delegate-gemini' },
       { from: 'mem0', to: 'delegate-gemini' },
       { from: 'context7', to: 'delegate-gemini' },
     ], kind: 'return',
-    msg: '8 targets -&gt; <span class="fn">delegate_gemini</span>: results returned' },
+    msg: '9 targets -&gt; <span class="fn">delegate_gemini</span>: results returned' },
   { pulses: [{ from: 'delegate-gemini', to: 'core' }], kind: 'return',
     msg: '<span class="fn">delegate_gemini</span> -&gt; core: consolidated result' },
   { pulses: [{ from: 'core', to: 'agent' }], kind: 'return',
     msg: 'core -&gt; agent: synthesized answer returned' },
 ];
-const KIND_COLOR = { direct: COLORS.sage, delegate: COLORS.amber, 'delegate-bounded': COLORS.violet, loop: COLORS.violet, fanout: COLORS.amber, return: COLORS.text };
+const KIND_COLOR = { direct: COLORS.sage, telemetry: COLORS.sky, delegate: COLORS.amber, 'delegate-bounded': COLORS.violet, loop: COLORS.violet, fanout: COLORS.amber, return: COLORS.text };
 
 // ---- ticker log: rolling last few lines, most recent highlighted ----
 const tickerEl = document.getElementById('ticker');
