@@ -461,7 +461,7 @@ function orbitFromStaticPos(pos, parentPos, speed, tilt = 0) {
 // 7 independently drifting/colliding orbits. Radius chosen to sit roughly
 // where the old collision-spaced cluster averaged out; yOffset matches the
 // services' original y(-1) relative to core's y(4).
-const SERVICE_RING_RADIUS = 10.5;
+const SERVICE_RING_RADIUS = 7.5; // reduced from 10.5 per request -- services orbit closer to core now
 const SERVICE_RING_SPEED = 0.00002; // shared direction + pace -- holds formation
 const SERVICE_RING_Y_OFFSET = -5;
 graph.services.forEach((s, i) => {
