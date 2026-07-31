@@ -451,38 +451,25 @@ function orbitFromStaticPos(pos, parentPos, speed, tilt = 0) {
 // ambience (~4.2 min/lap) once the outer service ring started sweeping
 // visibly wide arcs. Slowed here so the whole system reads as slow drift,
 // not something worth tracking.
+// STEP 1 (ring-restructure): outer service ring -- all 7 services now share
+// one fixed radius and one shared angular speed, evenly spaced by phase
+// (360/7 deg apart) instead of each computing its own radius/speed from its
+// old hand-placed static pos. Reads as one held "belt" formation instead of
+// 7 independently drifting/colliding orbits. Radius chosen to sit roughly
+// where the old collision-spaced cluster averaged out; yOffset matches the
+// services' original y(-1) relative to core's y(4).
+const SERVICE_RING_RADIUS = 10.5;
+const SERVICE_RING_SPEED = 0.00002; // shared direction + pace -- holds formation
+const SERVICE_RING_Y_OFFSET = -5;
 graph.services.forEach((s, i) => {
-  const dirSign = i % 2 === 0 ? 1 : -1;
-  s.orbit = orbitFromStaticPos(s.pos, graph.core.pos, 0.00002 * dirSign);
+  s.orbit = {
+    radius: SERVICE_RING_RADIUS,
+    phase: (i / graph.services.length) * Math.PI * 2,
+    yOffset: SERVICE_RING_Y_OFFSET,
+    speed: SERVICE_RING_SPEED,
+    tilt: 0,
+  };
 });
-// github/notion share a radius (~9.85), as do cloudflare/mem0 (~10.82) --
-// paired with opposite spin directions, that means each pair traces the
-// SAME circle in opposite directions and sweeps through each other twice
-// per lap. A naive per-pair +-0.6 nudge isn't enough: it only separates each
-// pair from its own twin, not from the OTHER pair, so two nudged radii from
-// different pairs can end up closer together than the orbs are wide, still
-// visibly colliding. Instead, force all four onto strictly separated
-// concentric circles. Spacing must clear each node's outer wireframe shell
-// (radius * 1.45 =~ 0.9, i.e. ~1.8 diameter), not just the solid sphere
-// (~1.24 diameter) -- otherwise the shells still swing through each other
-// even though the solid cores no longer touch.
-const SERVICE_ORBIT_SPACING = 2.5; // > shell diameter (~1.8), safe margin
-// pulled the whole ring in closer to core -- spacing (above) stays fixed so
-// the orbs stay just as collision-safe relative to each other, only their
-// shared distance from the center shrinks.
-const SERVICE_ORBIT_INSET = 3.5;
-const serviceBaseRadius =
-  graph.services.reduce((sum, s) => sum + s.orbit.radius, 0) / graph.services.length
-  - SERVICE_ORBIT_INSET;
-graph.services
-  .slice()
-  .sort((a, b) => a.orbit.radius - b.orbit.radius)
-  .forEach((s, i) => {
-    s.orbit.radius = serviceBaseRadius + (i - 1.5) * SERVICE_ORBIT_SPACING;
-  });
-// mem0 nudged out a touch further still, per request
-const mem0Service = graph.services.find(s => s.id === 'mem0');
-if (mem0Service) mem0Service.orbit.radius += 1.2;
 graph.delegates.forEach(d => {
   // radius works out to 0 (delegate-gemini sits directly below core in the
   // static layout, dx=dz=0) so this speed has no visible effect today -- left
