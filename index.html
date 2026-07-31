@@ -504,10 +504,17 @@ graph.repos.forEach((r, i) => {
 // STEP 2 (gap-fill): designerPhases orbit delegate-designer, same generic
 // treatment as repos orbiting delegate-gemini -- looked up by each phase's
 // own `parent` id so this stays independent of which delegate it belongs to.
+// pulled the generate/validate/fix sub-orbs in closer to delegate-designer --
+// the original static-pos-derived radii (~2.8/2.8/4) read a bit too spread
+// out for a compact bounded loop. Scaled down post-hoc rather than moving the
+// static positions themselves, so phase/yOffset and the maybeAddOrbitRing
+// dedupe key are untouched.
+const DESIGNER_PHASE_ORBIT_SCALE = 0.7;
 graph.designerPhases.forEach((p, i) => {
   const parentDelegate = graph.delegates.find(d => d.id === p.parent);
   const dirSign = i % 2 === 0 ? 1 : -1;
   p.orbit = orbitFromStaticPos(p.pos, parentDelegate.pos, 0.000025 * dirSign);
+  p.orbit.radius *= DESIGNER_PHASE_ORBIT_SCALE;
 });
 
 // STEP 4: researchModes orbit delegate-research, same generic treatment as
