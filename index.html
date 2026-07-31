@@ -369,6 +369,16 @@ const graph = {
   delegates: [
     { id:'delegate-gemini', pos:[0, -2, 0], parent:'core', label:'delegate_gemini', tool:'autonomous multi-repo investigation' },
     { id:'delegate-designer', pos:[-7, -3, 3], parent:'core', label:'delegate_designer', tool:'bounded loop: generate -> validate -> fix', shape:'designer' },
+    { id:'delegate-research', pos:[7, -3, -3], parent:'core', label:'delegate_research', tool:'web-only: precision (gemini) or wide (exa)', shape:'research' },
+  ],
+  // STEP 4: delegate_research's two mutually-exclusive, single-shot modes --
+  // precision (url+question -> one geminiGenerate call) and wide (task -> one
+  // Exa /answer call). Neither loops, so these orbit delegate-research the
+  // same generic way designerPhases orbit delegate-designer, just without a
+  // fix->regenerate cycle in the sequence later.
+  researchModes: [
+    { id:'research-precision', pos:[10, -6, -1], parent:'delegate-research', label:'precision', tool:'url+question -> gemini' },
+    { id:'research-wide',      pos:[ 5, -7, -7], parent:'delegate-research', label:'wide',      tool:'task -> exa /answer' },
   ],
   repos: [
     { id:'api-service',    pos:[-4, -7, 4], parent:'delegate-gemini', label:'api-service' },
@@ -496,6 +506,14 @@ graph.designerPhases.forEach((p, i) => {
   p.orbit = orbitFromStaticPos(p.pos, parentDelegate.pos, 0.000025 * dirSign);
 });
 
+// STEP 4: researchModes orbit delegate-research, same generic treatment as
+// designerPhases orbiting delegate-designer.
+graph.researchModes.forEach((m, i) => {
+  const parentDelegate = graph.delegates.find(d => d.id === m.parent);
+  const dirSign = i % 2 === 0 ? 1 : -1;
+  m.orbit = orbitFromStaticPos(m.pos, parentDelegate.pos, 0.000025 * dirSign);
+});
+
 // world-position cache, recomputed every frame by updateOrbits() below.
 // agent/core are literal constants; everything else is looked up by id.
 // Nothing reads from this yet (that starts in step 2) -- for now it's purely
@@ -543,6 +561,10 @@ function updateOrbits(nowMs) {
   graph.designerPhases.forEach(p => {
     orbitWorldPositions[p.id] = computeOrbitPosition(p.orbit, orbitWorldPositions[p.parent], elapsedMs);
   });
+  // STEP 4: same requirement -- research modes orbit delegate-research.
+  graph.researchModes.forEach(m => {
+    orbitWorldPositions[m.id] = computeOrbitPosition(m.orbit, orbitWorldPositions[m.parent], elapsedMs);
+  });
 }
 
 // ---- STEP 2: wire up parent-relative groups ----
@@ -563,6 +585,7 @@ function applyOrbitPositions() {
   graph.delegates.forEach(d => { const g = nodeGroups[d.id]; if (g) g.position.copy(orbitWorldPositions[d.id]); });
   graph.repos.forEach(r => { const g = nodeGroups[r.id]; if (g) g.position.copy(orbitWorldPositions[r.id]); });
   graph.designerPhases.forEach(p => { const g = nodeGroups[p.id]; if (g) g.position.copy(orbitWorldPositions[p.id]); });
+  graph.researchModes.forEach(m => { const g = nodeGroups[m.id]; if (g) g.position.copy(orbitWorldPositions[m.id]); });
 }
 
 const nodeGroup = new THREE.Group();
