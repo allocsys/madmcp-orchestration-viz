@@ -1195,12 +1195,21 @@ graph.services.forEach((s, i) => {
   }
   const delay = ENTRANCE_PHASE.services + i * ENTRANCE_STAGGER;
   registerNodeEntrance(s.id, delay);
-  // STEP 3 (gap-fill): telemetry/observability calls get a visibly thinner,
-  // dimmer, sky-colored connector vs. management/write calls -- read-only
-  // querying shouldn't look as "heavy" on the wire as a control-plane action.
+  // direct-call connectors (core -> github/notion/cloudflare/mem0/context7/
+  // fetch) removed per request -- the static wire + its shimmer overlay are
+  // gone, but the sequence's 'direct' pulses still travel these edges just
+  // fine: spawnPulse/updatePulses read live positions straight out of
+  // orbitWorldPositions, independent of any registered connector mesh (a
+  // missing connectorRegistry entry just means shimmerMesh is null, which
+  // updatePulses already treats as "no wire shimmer" -- see the `if
+  // (p.shimmerMesh)` guard there). Only the telemetry connector
+  // (core -> cloudflare-observability) is kept, since that one wasn't a
+  // "direct" line to begin with.
   const isTelemetry = s.id === 'cloudflare-observability';
-  const w = addConnector(graph.core.pos, s.pos, isTelemetry ? 0.02 : 0.035, s.color || COLORS.wire, isTelemetry ? 0.3 : 0.45, 'core', s.id);
-  registerWireEntrance(w, isTelemetry ? 0.3 : 0.45, delay + 130);
+  if (isTelemetry) {
+    const w = addConnector(graph.core.pos, s.pos, 0.02, s.color || COLORS.wire, 0.3, 'core', s.id);
+    registerWireEntrance(w, 0.3, delay + 130);
+  }
 });
 
 // STEP 5 (gap-fill): sync_mem0_to_notion is a real cross-service orchestration
