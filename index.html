@@ -488,6 +488,11 @@ graph.delegates.forEach(d => {
   // slowed in step with the rest in case that ever changes.
   d.orbit = orbitFromStaticPos(d.pos, graph.core.pos, 0.00001);
 });
+// pulled api-service/worker-queue/shared-types in closer to delegate_agent --
+// halved post-collision-fix, same scale-after-adjust pattern used for the
+// designer sub-orbs above, so the +-0.4 collision spacing between
+// api-service/worker-queue still holds proportionally.
+const REPO_ORBIT_SCALE = 0.5;
 graph.repos.forEach((r, i) => {
   const delegateGemini = graph.delegates.find(d => d.id === r.parent);
   const dirSign = i % 2 === 0 ? 1 : -1;
@@ -499,6 +504,7 @@ graph.repos.forEach((r, i) => {
   // api-service/worker-queue share a radius (~5.66) around delegate-gemini --
   // same collision pattern as the services pair above, same fix.
   r.orbit.radius += dirSign * 0.4;
+  r.orbit.radius *= REPO_ORBIT_SCALE;
 });
 
 // STEP 2 (gap-fill): designerPhases orbit delegate-designer, same generic
