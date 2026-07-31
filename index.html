@@ -560,20 +560,36 @@ graph.designerPhases.forEach((p, i) => {
   };
 });
 
-// STEP 4: researchModes orbit delegate-research, same generic treatment as
-// designerPhases orbiting delegate-designer.
-// pulled precision/wide in closer to delegate-research, same scale-after-
-// orbitFromStaticPos pattern used for the designer sub-orbs and repos above.
-// STEP 2 (delegate-reposition-plan) check: same reasoning as designerPhases
-// above -- offset derived from static positions, re-applied to delegate-
-// research's live (now repositioned) position every frame, resolved after
-// graph.delegates in updateOrbits(). No lag/detachment.
-const RESEARCH_MODE_ORBIT_SCALE = 0.5;
+// STEP 2 (sub-orb-ring-unification): researchModes get the same shared-ring
+// treatment designerPhases got in Step 1 above -- one shared fixed
+// radius/yOffset/speed for both precision and wide, evenly spaced 180 deg
+// apart, instead of each deriving its own radius/yOffset from its old static
+// pos (via orbitFromStaticPos, scaled by the old RESEARCH_MODE_ORBIT_SCALE)
+// with an alternating +/- speed per sibling. Radius/yOffset chosen close to
+// the old individually-derived range (radius ~1.8/2.24, yOffset -3/-4) so the
+// footprint doesn't jump visually. Speed is a single shared positive value
+// (no more per-sibling dirSign) since a coherent ring needs uniform angular
+// speed for its members' relative phase spacing to stay constant over time --
+// same reasoning as designerPhases' Step 1. This lets maybeAddOrbitRing's
+// dedupe key (parentId+radius+tilt+yOffset) collapse both modes onto one
+// shared ring mesh around delegate-research, same as delegate_designer/
+// delegate_research already share one ring around core, and designerPhases
+// now share one ring around delegate-designer. Resolution order is
+// unchanged: updateOrbits() still resolves graph.delegates before this loop,
+// so the parent position read here is always this frame's, never stale --
+// same check as designerPhases and the delegate-reposition-plan already
+// covered. See docs/sub-orb-ring-unification-proposal.md.
+const RESEARCH_MODE_RING_RADIUS = 2.0;
+const RESEARCH_MODE_RING_Y_OFFSET = -3.5;
+const RESEARCH_MODE_RING_SPEED = 0.000025;
 graph.researchModes.forEach((m, i) => {
-  const parentDelegate = graph.delegates.find(d => d.id === m.parent);
-  const dirSign = i % 2 === 0 ? 1 : -1;
-  m.orbit = orbitFromStaticPos(m.pos, parentDelegate.pos, 0.000025 * dirSign);
-  m.orbit.radius *= RESEARCH_MODE_ORBIT_SCALE;
+  m.orbit = {
+    radius: RESEARCH_MODE_RING_RADIUS,
+    phase: (i / graph.researchModes.length) * Math.PI * 2,
+    yOffset: RESEARCH_MODE_RING_Y_OFFSET,
+    speed: RESEARCH_MODE_RING_SPEED,
+    tilt: 0,
+  };
 });
 
 // world-position cache, recomputed every frame by updateOrbits() below.
