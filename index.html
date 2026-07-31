@@ -112,7 +112,7 @@
   <div class="row"><span>telemetry (read-only)</span><span class="dot telemetry"></span></div>
   <div class="row"><span>delegation</span><span class="dot delegate"></span></div>
   <div class="row"><span>bounded loop</span><span class="dot loop"></span></div>
-  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result. a bounded loop (delegate_designer) cycles through a fixed generate &#8594; validate &#8594; fix sequence instead of fanning out. cloudflare is split into control-plane calls (manage workers/d1/r2/hyperdrive) and read-only telemetry querying, shown as a thinner, dimmer line.</div>
+  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result. a bounded loop (delegate_designer) cycles through a fixed generate &#8594; validate &#8594; fix sequence instead of fanning out. cloudflare is split into control-plane calls (manage workers/d1/r2/hyperdrive) and read-only telemetry querying, shown as a thinner, dimmer line. delegate_research is single-shot, not a loop: precision (sky) fetches one page and asks gemini a question; wide (sage) asks exa one search+synthesis question -- neither has github/notion/cloudflare access.</div>
 </div>
 
 <div id="ticker" aria-live="polite">
@@ -894,6 +894,59 @@ function addDesignerNode(id, pos, label, sublabel) {
   return group;
 }
 
+// STEP 4: delegate_research's node -- a tetrahedron core (distinct from
+// delegate_agent's octahedron and delegate_designer's dodecahedron) with a
+// SINGLE ring like delegate_designer, but sky-colored: signals "single-shot,
+// read-only, web-facing" -- neither an open multi-target fan-out (amber,
+// delegate_agent) nor a bounded generate/validate/fix loop (violet,
+// delegate_designer). The two child mode-nodes it points to (precision/wide)
+// are what carry the actual distinction the plan asked for.
+function addResearchNode(id, pos, label, sublabel) {
+  const group = new THREE.Group();
+  group.position.set(...pos);
+
+  const coreGeo = new THREE.TetrahedronGeometry(0.7, 0);
+  const coreMat = new THREE.MeshPhysicalMaterial({
+    color: COLORS.sky, emissive: COLORS.sky, emissiveIntensity: 0.45,
+    roughness: 0.3, metalness: 0.2, clearcoat: 0.7, clearcoatRoughness: 0.2,
+    flatShading: true,
+  });
+  const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+  coreMesh.userData.baseEmissive = 0.45;
+  coreMesh.userData.breathePhase = Math.random() * Math.PI * 2;
+  coreMesh.userData.breatheSpeed = 0.0009 + Math.random() * 0.0006;
+  group.add(coreMesh);
+
+  const ringGeo = new THREE.TorusGeometry(1.02, 0.02, 8, 48);
+  const ringMat = new THREE.MeshBasicMaterial({ color: COLORS.sky, transparent:true, opacity:0.5 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = Math.PI / 2.2;
+  group.add(ring);
+  rotatingShells.push({ mesh: ring, axis: 'z', speed: 0.00009 });
+
+  const glow = makeGlowSprite(COLORS.sky, 4.4, 0.5);
+  glow.userData.breathePhase = Math.random() * Math.PI * 2;
+  glow.userData.breatheSpeed = 0.0009 + Math.random() * 0.0006;
+  group.add(glow);
+
+  nodeGroup.add(group);
+  nodeMeshes[id] = coreMesh;
+  nodeMeshes[id + '-group'] = group;
+  nodeMeshes[id + '-glow'] = glow;
+
+  const lbl = makeLabel(label, { mono: true, size: 40, color:'#5AC8E8', weight:'600' });
+  lbl.position.set(0, 1.65, 0);
+  group.add(lbl);
+
+  if (sublabel) {
+    const sub = makeLabel(sublabel, { mono: true, size: 26, color:'#7C8798' });
+    sub.position.set(0, -1.45, 0);
+    group.add(sub);
+  }
+  nodeGroups[id] = group;
+  return group;
+}
+
 // github service node: a simplified octocat-style silhouette (rounded head +
 // two pointed ears) built from primitives, so the github endpoint reads as
 // something more specific than the same low-poly sphere used for every other
@@ -1008,11 +1061,13 @@ graph.services.forEach((s, i) => {
 graph.delegates.forEach(d => {
   if (d.shape === 'designer') {
     addDesignerNode(d.id, d.pos, d.label, d.tool);
+  } else if (d.shape === 'research') {
+    addResearchNode(d.id, d.pos, d.label, d.tool);
   } else {
     addDelegateNode(d.id, d.pos, d.label, d.tool);
   }
   registerNodeEntrance(d.id, ENTRANCE_PHASE.delegate);
-  const connectorColor = d.shape === 'designer' ? COLORS.violet : COLORS.amber;
+  const connectorColor = d.shape === 'designer' ? COLORS.violet : d.shape === 'research' ? COLORS.sky : COLORS.amber;
   const c = addConnector(graph.core.pos, d.pos, 0.05, connectorColor, 0.85, 'core', d.id);
   registerWireEntrance(c, 0.85, ENTRANCE_PHASE.delegate + 130);
 });
@@ -1043,6 +1098,23 @@ graph.designerPhases.forEach((p, i) => {
   const delay = ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER;
   registerNodeEntrance(p.id, delay);
   const c = addConnector(delegateDesigner.pos, p.pos, 0.028, COLORS.violet, 0.5, delegateDesigner.id, p.id);
+  registerWireEntrance(c, 0.5, delay + 130);
+});
+
+// STEP 4: delegate_research -> precision/wide mode nodes. Unlike
+// designerPhases these don't loop into each other -- each mode is its own
+// single-shot path, so each gets its own connector color (reusing the
+// telemetry-sky / direct-sage palette on purpose: precision reads like a
+// single external read via Gemini, wide reads like a single direct call to
+// Exa, echoing why those colors already mean "single read-only hop"
+// elsewhere in the legend) instead of one shared loop-violet.
+const delegateResearch = graph.delegates.find(d => d.id === 'delegate-research');
+graph.researchModes.forEach((m, i) => {
+  const modeColor = m.id === 'research-precision' ? COLORS.sky : COLORS.sage;
+  addNode(m.id, m.pos, 0.28, modeColor, m.label, m.tool);
+  const delay = ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER;
+  registerNodeEntrance(m.id, delay);
+  const c = addConnector(delegateResearch.pos, m.pos, 0.028, modeColor, 0.5, delegateResearch.id, m.id);
   registerWireEntrance(c, 0.5, delay + 130);
 });
 
@@ -1090,6 +1162,7 @@ graph.delegates.forEach(d => {
 });
 graph.repos.forEach(r => maybeAddOrbitRing(r.parent, r.orbit, COLORS.amber, 0.06));
 graph.designerPhases.forEach(p => maybeAddOrbitRing(p.parent, p.orbit, COLORS.violet, 0.06));
+graph.researchModes.forEach(m => maybeAddOrbitRing(m.parent, m.orbit, m.id === 'research-precision' ? COLORS.sky : COLORS.sage, 0.06));
 
 // tracks each ring's position onto its (possibly itself-orbiting) parent's
 // CURRENT world position every frame -- core never moves so those rings are
@@ -1384,6 +1457,18 @@ const sequence = [
     msg: 'fix -&gt; regenerate' },
   { pulses: [{ from: 'delegate-designer', to: 'core' }], kind: 'return',
     msg: '<span class="fn">delegate_designer</span> -&gt; core: validated result' },
+  { pulses: [{ from: 'core', to: 'delegate-research' }], kind: 'delegate',
+    msg: 'core -&gt; <span class="fn">delegate_research</span>: handoff (web-only, read-only)' },
+  { pulses: [{ from: 'delegate-research', to: 'research-precision' }], kind: 'research-precision',
+    msg: '<span class="fn">delegate_research</span> precision: url+question -&gt; gemini' },
+  { pulses: [{ from: 'research-precision', to: 'delegate-research' }], kind: 'return',
+    msg: 'precision -&gt; <span class="fn">delegate_research</span>: compact answer' },
+  { pulses: [{ from: 'delegate-research', to: 'research-wide' }], kind: 'research-wide',
+    msg: '<span class="fn">delegate_research</span> wide: task -&gt; exa /answer' },
+  { pulses: [{ from: 'research-wide', to: 'delegate-research' }], kind: 'return',
+    msg: 'wide -&gt; <span class="fn">delegate_research</span>: answer + sources' },
+  { pulses: [{ from: 'delegate-research', to: 'core' }], kind: 'return',
+    msg: '<span class="fn">delegate_research</span> -&gt; core: research result' },
   { pulses: [{ from: 'core', to: 'delegate-gemini' }], kind: 'delegate',
     msg: 'core -&gt; <span class="fn">delegate_gemini</span>: handoff (autonomous)' },
   { pulses: [
@@ -1415,7 +1500,7 @@ const sequence = [
   { pulses: [{ from: 'core', to: 'agent' }], kind: 'return',
     msg: 'core -&gt; agent: synthesized answer returned' },
 ];
-const KIND_COLOR = { direct: COLORS.sage, telemetry: COLORS.sky, delegate: COLORS.amber, 'delegate-bounded': COLORS.violet, loop: COLORS.violet, fanout: COLORS.amber, return: COLORS.text };
+const KIND_COLOR = { direct: COLORS.sage, telemetry: COLORS.sky, delegate: COLORS.amber, 'delegate-bounded': COLORS.violet, loop: COLORS.violet, fanout: COLORS.amber, return: COLORS.text, 'research-precision': COLORS.sky, 'research-wide': COLORS.sage };
 
 // ---- ticker log: rolling last few lines, most recent highlighted ----
 const tickerEl = document.getElementById('ticker');
