@@ -115,7 +115,7 @@
   <div class="row"><span>delegation</span><span class="dot delegate"></span></div>
   <div class="row"><span>bounded loop</span><span class="dot loop"></span></div>
   <div class="row"><span>cross-service sync</span><span class="dot sync"></span></div>
-  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result. a bounded loop (delegate_designer) cycles through a fixed generate &#8594; validate &#8594; fix sequence instead of fanning out. cloudflare is split into control-plane calls (manage workers/d1/r2/hyperdrive) and read-only telemetry querying, shown as a thinner, dimmer line. delegate_research is single-shot, not a loop: precision (sky) fetches one page and asks gemini a question; wide (sage) asks exa one search+synthesis question -- neither has github/notion/cloudflare access. the rose line direct from mem0 to notion is sync_mem0_to_notion -- a real cross-service orchestration edge, not two independent service calls.</div>
+  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result. a bounded loop (delegate_designer) cycles through a fixed generate &#8594; validate &#8594; fix sequence instead of fanning out. cloudflare is split into control-plane calls (manage workers/d1/r2/hyperdrive) and read-only telemetry querying, shown as a thinner, dimmer line. delegate_research is single-shot, not a loop: precision (sky) fetches one page and asks gemini a question; wide (sage) asks exa one search+synthesis question -- neither has github/notion/cloudflare access. the rose line direct from mem0 to notion is sync_mem0_to_notion -- a real cross-service orchestration edge, not two independent service calls. the faint double ring wrapping core is the security boundary -- IP allowlisting, shared-key auth, and proxy-hop trust checks every call passes through before it reaches any connector -- shown as a standing gate, not a per-request animation.</div>
 </div>
 
 <div id="ticker" aria-live="polite">
@@ -1011,6 +1011,45 @@ function addGithubNode(id, pos, label, sublabel) {
   return head;
 }
 
+// STEP 6: security/auth boundary -- a static, clearly-labeled gate ring
+// around Core representing the IP allowlist + shared-key auth + proxy-hop
+// trust checks (connectors/security.js) that every call passes through
+// before it reaches any connector. Deliberately NOT tied to the pulse
+// sequence (per plan: "does not need per-request animation") -- it's a
+// standing boundary, not a per-call event, so it only gets the same ambient
+// idle behavior as the containment shells elsewhere (slow independent spin),
+// never a flash or color change keyed to traffic.
+function addSecurityGate(pos, radius, label) {
+  const group = new THREE.Group();
+  group.position.set(...pos);
+
+  const geo = new THREE.TorusGeometry(radius, 0.03, 8, 64);
+  const mat = new THREE.MeshBasicMaterial({ color: COLORS.wire, transparent: true, opacity: 0.4 });
+  const gate = new THREE.Mesh(geo, mat);
+  gate.rotation.x = Math.PI / 2.3;
+  group.add(gate);
+  rotatingShells.push({ mesh: gate, axis: 'y', speed: 0.000015 });
+
+  // second ring at a different tilt, same idea as the delegate nodes' two
+  // intersecting rings -- reads as a containment field wrapping core, not
+  // just a single flat hoop
+  const geo2 = new THREE.TorusGeometry(radius * 0.94, 0.02, 8, 64);
+  const mat2 = new THREE.MeshBasicMaterial({ color: COLORS.wire, transparent: true, opacity: 0.25 });
+  const gate2 = new THREE.Mesh(geo2, mat2);
+  gate2.rotation.x = -Math.PI / 3;
+  gate2.rotation.y = Math.PI / 6;
+  group.add(gate2);
+  rotatingShells.push({ mesh: gate2, axis: 'z', speed: -0.00001 });
+
+  const lbl = makeLabel(label, { mono: true, size: 28, color:'#7C8798' });
+  lbl.position.set(0, -radius - 0.55, 0);
+  group.add(lbl);
+
+  nodeGroup.add(group);
+  nodeGroups['security-gate'] = group;
+  return group;
+}
+
 // entrance-choreography phase timing (ms from page load) -- nodes scale in
 // agent -> core -> services -> delegate -> repos, each phase overlapping
 // slightly into the next so it reads as one continuous beat, not four stops.
@@ -1041,6 +1080,14 @@ registerNodeEntrance('agent', ENTRANCE_PHASE.agent);
 registerNodeEntrance('core', ENTRANCE_PHASE.core);
 const agentCoreWire = addConnector(graph.agent.pos, graph.core.pos, 0.045, COLORS.wire, 0.6, 'agent', 'core');
 registerWireEntrance(agentCoreWire, 0.6, ENTRANCE_PHASE.core + 150);
+
+// STEP 6: gate sits just outside core's own glow (core.r=1.0, glow scale
+// core.r*5.2) and well inside the service orbit ring (inset base radius
+// starts several units further out after STEP 6's ring-tuning pass), so it
+// reads as wrapping core specifically rather than colliding with the
+// orbiting service/delegate nodes.
+addSecurityGate(graph.core.pos, graph.core.r + 1.4, 'auth boundary \u2014 IP allowlist + shared key');
+registerNodeEntrance('security-gate', ENTRANCE_PHASE.core + 80);
 
 // core -> services (DIRECT CALL — thin solid connector, one hop; upgraded from
 // a plain addWire Line so these edges can shimmer in sync with pulses too)
