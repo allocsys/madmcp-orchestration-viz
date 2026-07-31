@@ -111,7 +111,7 @@
 
 <div id="ticker" aria-live="polite">
   <div class="line">&gt; system ready — <span class="fn">madmcp</span> core online</div>
-  <div class="line">&gt; direct calls: github · notion · cloudflare · mem0</div>
+  <div class="line">&gt; direct calls: github · notion · cloudflare · mem0 · context7</div>
   <div class="line active">&gt; awaiting orchestration sequence…</div>
 </div>
 
@@ -351,6 +351,7 @@ const graph = {
     { id:'notion',     pos:[ 9, -1,  4], parent:'core', label:'notion',     tool:'notion_search · notion_query_database' },
     { id:'cloudflare', pos:[-9, -1, -6], parent:'core', label:'cloudflare', tool:'cf_workers_list · cf_d1_database_query' },
     { id:'mem0',       pos:[ 9, -1, -6], parent:'core', label:'mem0',       tool:'mem0_search · mem0_add' },
+    { id:'context7',   pos:[ 0, -1,  9], parent:'core', label:'context7',   tool:'get_library_docs · search_library' },
   ],
   // delegation: core hands the WHOLE task to this sub-agent, which independently
   // fans out to multiple repos and reports back one consolidated result.
@@ -1235,6 +1236,8 @@ const sequence = [
     msg: 'core -&gt; <span class="fn">cloudflare</span>: direct call' },
   { pulses: [{ from: 'core', to: 'mem0' }], kind: 'direct',
     msg: 'core -&gt; <span class="fn">mem0</span>: direct call' },
+  { pulses: [{ from: 'core', to: 'context7' }], kind: 'direct',
+    msg: 'core -&gt; <span class="fn">context7</span>: direct call' },
   { pulses: [{ from: 'core', to: 'delegate-gemini' }], kind: 'delegate',
     msg: 'core -&gt; <span class="fn">delegate_gemini</span>: handoff (autonomous)' },
   { pulses: [
@@ -1245,8 +1248,9 @@ const sequence = [
       { from: 'delegate-gemini', to: 'notion' },
       { from: 'delegate-gemini', to: 'cloudflare' },
       { from: 'delegate-gemini', to: 'mem0' },
+      { from: 'delegate-gemini', to: 'context7' },
     ], kind: 'fanout',
-    msg: '<span class="fn">delegate_gemini</span> fans out to 7 targets in parallel' },
+    msg: '<span class="fn">delegate_gemini</span> fans out to 8 targets in parallel' },
   { pulses: [
       { from: 'api-service', to: 'delegate-gemini' },
       { from: 'worker-queue', to: 'delegate-gemini' },
@@ -1255,8 +1259,9 @@ const sequence = [
       { from: 'notion', to: 'delegate-gemini' },
       { from: 'cloudflare', to: 'delegate-gemini' },
       { from: 'mem0', to: 'delegate-gemini' },
+      { from: 'context7', to: 'delegate-gemini' },
     ], kind: 'return',
-    msg: '7 targets -&gt; <span class="fn">delegate_gemini</span>: results returned' },
+    msg: '8 targets -&gt; <span class="fn">delegate_gemini</span>: results returned' },
   { pulses: [{ from: 'delegate-gemini', to: 'core' }], kind: 'return',
     msg: '<span class="fn">delegate_gemini</span> -&gt; core: consolidated result' },
   { pulses: [{ from: 'core', to: 'agent' }], kind: 'return',
