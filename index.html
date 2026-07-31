@@ -158,11 +158,14 @@ const COLORS = {
 // ---- renderer / scene / camera ----
 const wrap = document.getElementById('canvas-wrap');
 const scene = new THREE.Scene();
-// STEP 6: nudged from 0.028 -- the outer service ring's collision-spacing
-// pass (mem0 in particular) now sweeps out to ~11.8 units from core, vs.
-// ~10.8 at the original static layout, so fog needs to reach a touch farther
-// before it fully swallows that orbit.
-scene.fog = new THREE.FogExp2(COLORS.base, 0.024);
+// STEP 3 (ring-restructure): the STEP 1 outer service ring replaced the old
+// collision-spaced cluster (which swept out to ~11.8 units at its widest,
+// mem0 in particular) with one uniform fixed radius of 10.5 -- a smaller,
+// more consistent outermost reach. Density scaled back up proportionally
+// (0.024 * 11.8/10.5 ~= 0.027) so fog still swallows the new ring at
+// roughly the same visual falloff as before, instead of reaching farther
+// than the graph now actually extends.
+scene.fog = new THREE.FogExp2(COLORS.base, 0.027);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 1000);
 camera.position.set(0, 6, 26);
@@ -1108,10 +1111,11 @@ const agentCoreWire = addConnector(graph.agent.pos, graph.core.pos, 0.045, COLOR
 registerWireEntrance(agentCoreWire, 0.6, ENTRANCE_PHASE.core + 150);
 
 // STEP 6: gate sits just outside core's own glow (core.r=1.0, glow scale
-// core.r*5.2) and well inside the service orbit ring (inset base radius
-// starts several units further out after STEP 6's ring-tuning pass), so it
-// reads as wrapping core specifically rather than colliding with the
-// orbiting service/delegate nodes.
+// core.r*5.2). STEP 3 (ring-restructure) check: at radius core.r+1.4=2.4,
+// the gate stays far inside both new fixed rings -- the STEP 2 inner
+// delegate ring (7.5) and STEP 1 outer service ring (10.5) -- so it still
+// reads as wrapping core specifically, not colliding with either ring. No
+// radius change needed.
 addSecurityGate(graph.core.pos, graph.core.r + 1.4, 'auth boundary \u2014 IP allowlist + shared key');
 registerNodeEntrance('security-gate', ENTRANCE_PHASE.core + 80);
 
@@ -1635,14 +1639,16 @@ let isDragging = false, prevX = 0, prevY = 0;
 // repo leaves at bottom) doesn't fit at the desktop default distance --
 // start further back so nothing is cropped before the user zooms manually.
 const isNarrow = window.innerWidth < 640;
-// STEP 6: all three distances bumped a bit from their pre-orbit values
-// (26/34 default, 14-42/20-46 range) -- the service ring's outermost orbit
-// (mem0, ~11.8 units from core, see the fog comment above) plus its glow
-// sprite was sitting right at the edge of frame at the old default distance,
-// so there's now a bit more breathing room at every zoom level rather than
-// requiring the user to manually zoom out to see the full sweep.
-let theta = 0.35, phi = 1.15, radius = isNarrow ? 36 : 28; // spherical coords around origin
-const MIN_RADIUS = isNarrow ? 21 : 15, MAX_RADIUS = isNarrow ? 49 : 45;
+// STEP 3 (ring-restructure): STEP 6's distances were tuned for the old
+// collision-spaced cluster's ~11.8-unit outermost reach (mem0). The STEP 1
+// outer service ring fixed that reach at a smaller, uniform 10.5, and the
+// STEP 2 inner delegate ring sits tighter still at 7.5 -- both inside the
+// old worst case -- so all three distances are scaled back by the same
+// ~0.89 ratio (10.5/11.8) used for the fog density above, keeping the same
+// proportional framing/zoom feel rather than leaving extra unused headroom
+// now that the graph's outermost sweep is smaller and steadier.
+let theta = 0.35, phi = 1.15, radius = isNarrow ? 32 : 25; // spherical coords around origin
+const MIN_RADIUS = isNarrow ? 19 : 13, MAX_RADIUS = isNarrow ? 44 : 40;
 function updateCamera() {
   camera.position.x = radius * Math.sin(phi) * Math.sin(theta);
   camera.position.z = radius * Math.sin(phi) * Math.cos(theta);
