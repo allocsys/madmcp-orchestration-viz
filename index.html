@@ -14,6 +14,7 @@
     --wire:#4A6B8A;
     --amber:#F2A65A;
     --sage:#6FCF97;
+    --violet:#C792EA;
     --text:#E8EDF2;
     --muted:#7C8798;
   }
@@ -83,6 +84,7 @@
   #legend .dot{width:8px; height:8px; border-radius:50%; flex:none;}
   #legend .dot.direct{background:var(--sage);}
   #legend .dot.delegate{background:var(--amber); box-shadow:0 0 6px var(--amber);}
+  #legend .dot.loop{background:var(--violet); box-shadow:0 0 6px var(--violet);}
   #legend .caption{color:var(--muted); opacity:0.75; font-size:10px; margin-top:6px; max-width:220px;}
 
   @media (max-width: 640px){
@@ -106,7 +108,8 @@
 <div id="legend" aria-hidden="true">
   <div class="row"><span>direct call</span><span class="dot direct"></span></div>
   <div class="row"><span>delegation</span><span class="dot delegate"></span></div>
-  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result</div>
+  <div class="row"><span>bounded loop</span><span class="dot loop"></span></div>
+  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result. a bounded loop (delegate_designer) cycles through a fixed generate &#8594; validate &#8594; fix sequence instead of fanning out.</div>
 </div>
 
 <div id="ticker" aria-live="polite">
@@ -141,6 +144,7 @@ const COLORS = {
   amber: 0xF2A65A,
   sage: 0x6FCF97,
   text: 0xE8EDF2,
+  violet: 0xC792EA,
 };
 
 // ---- renderer / scene / camera ----
@@ -359,11 +363,20 @@ const graph = {
   // so it reads as core's own delegate, not an unrelated satellite.
   delegates: [
     { id:'delegate-gemini', pos:[0, -2, 0], parent:'core', label:'delegate_gemini', tool:'autonomous multi-repo investigation' },
+    { id:'delegate-designer', pos:[-7, -3, 3], parent:'core', label:'delegate_designer', tool:'bounded loop: generate -> validate -> fix', shape:'designer' },
   ],
   repos: [
     { id:'api-service',    pos:[-4, -7, 4], parent:'delegate-gemini', label:'api-service' },
     { id:'worker-queue',   pos:[ 4, -7, 4], parent:'delegate-gemini', label:'worker-queue' },
     { id:'shared-types',   pos:[ 0, -8, -5], parent:'delegate-gemini', label:'shared-types' },
+  ],
+  // STEP 2 (gap-fill): delegate_designer's own bounded loop -- three phase
+  // nodes it cycles through (generate -> validate -> fix -> regenerate),
+  // never fanning out to arbitrary repos the way delegate_gemini does.
+  designerPhases: [
+    { id:'design-generate', pos:[-9, -5,  1], parent:'delegate-designer', label:'generate' },
+    { id:'design-validate', pos:[-5, -6,  5], parent:'delegate-designer', label:'validate' },
+    { id:'design-fix',      pos:[-7, -6, -1], parent:'delegate-designer', label:'fix' },
   ]
 };
 
@@ -469,6 +482,15 @@ graph.repos.forEach((r, i) => {
   r.orbit.radius += dirSign * 0.4;
 });
 
+// STEP 2 (gap-fill): designerPhases orbit delegate-designer, same generic
+// treatment as repos orbiting delegate-gemini -- looked up by each phase's
+// own `parent` id so this stays independent of which delegate it belongs to.
+graph.designerPhases.forEach((p, i) => {
+  const parentDelegate = graph.delegates.find(d => d.id === p.parent);
+  const dirSign = i % 2 === 0 ? 1 : -1;
+  p.orbit = orbitFromStaticPos(p.pos, parentDelegate.pos, 0.000025 * dirSign);
+});
+
 // world-position cache, recomputed every frame by updateOrbits() below.
 // agent/core are literal constants; everything else is looked up by id.
 // Nothing reads from this yet (that starts in step 2) -- for now it's purely
@@ -511,6 +533,11 @@ function updateOrbits(nowMs) {
   graph.repos.forEach(r => {
     orbitWorldPositions[r.id] = computeOrbitPosition(r.orbit, orbitWorldPositions[r.parent], elapsedMs);
   });
+  // STEP 2 (gap-fill): resolved after graph.delegates above, since phases
+  // orbit delegate-designer, which must already have this frame's position.
+  graph.designerPhases.forEach(p => {
+    orbitWorldPositions[p.id] = computeOrbitPosition(p.orbit, orbitWorldPositions[p.parent], elapsedMs);
+  });
 }
 
 // ---- STEP 2: wire up parent-relative groups ----
@@ -530,6 +557,7 @@ function applyOrbitPositions() {
   graph.services.forEach(s => { const g = nodeGroups[s.id]; if (g) g.position.copy(orbitWorldPositions[s.id]); });
   graph.delegates.forEach(d => { const g = nodeGroups[d.id]; if (g) g.position.copy(orbitWorldPositions[d.id]); });
   graph.repos.forEach(r => { const g = nodeGroups[r.id]; if (g) g.position.copy(orbitWorldPositions[r.id]); });
+  graph.designerPhases.forEach(p => { const g = nodeGroups[p.id]; if (g) g.position.copy(orbitWorldPositions[p.id]); });
 }
 
 const nodeGroup = new THREE.Group();
@@ -787,6 +815,57 @@ function addDelegateNode(id, pos, label, sublabel) {
   return group;
 }
 
+// STEP 2 (gap-fill): delegate_designer's node -- a dodecahedron core (not
+// delegate_gemini's octahedron) with a SINGLE ring (not delegate_gemini's
+// two intersecting rings), in a distinct violet accent. Signals "bounded,
+// single-track loop" vs. delegate_gemini's "open, multi-target fan-out" at
+// a glance, without needing the legend to carry the whole distinction.
+function addDesignerNode(id, pos, label, sublabel) {
+  const group = new THREE.Group();
+  group.position.set(...pos);
+
+  const coreGeo = new THREE.DodecahedronGeometry(0.62, 0);
+  const coreMat = new THREE.MeshPhysicalMaterial({
+    color: COLORS.violet, emissive: COLORS.violet, emissiveIntensity: 0.45,
+    roughness: 0.3, metalness: 0.2, clearcoat: 0.7, clearcoatRoughness: 0.2,
+    flatShading: true,
+  });
+  const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+  coreMesh.userData.baseEmissive = 0.45;
+  coreMesh.userData.breathePhase = Math.random() * Math.PI * 2;
+  coreMesh.userData.breatheSpeed = 0.0009 + Math.random() * 0.0006;
+  group.add(coreMesh);
+
+  const ringGeo = new THREE.TorusGeometry(1.0, 0.02, 8, 48);
+  const ringMat = new THREE.MeshBasicMaterial({ color: COLORS.violet, transparent:true, opacity:0.5 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = Math.PI / 2.2;
+  group.add(ring);
+  rotatingShells.push({ mesh: ring, axis: 'z', speed: 0.00009 });
+
+  const glow = makeGlowSprite(COLORS.violet, 4.2, 0.5);
+  glow.userData.breathePhase = Math.random() * Math.PI * 2;
+  glow.userData.breatheSpeed = 0.0009 + Math.random() * 0.0006;
+  group.add(glow);
+
+  nodeGroup.add(group);
+  nodeMeshes[id] = coreMesh;
+  nodeMeshes[id + '-group'] = group;
+  nodeMeshes[id + '-glow'] = glow;
+
+  const lbl = makeLabel(label, { mono: true, size: 40, color:'#C792EA', weight:'600' });
+  lbl.position.set(0, 1.6, 0);
+  group.add(lbl);
+
+  if (sublabel) {
+    const sub = makeLabel(sublabel, { mono: true, size: 26, color:'#7C8798' });
+    sub.position.set(0, -1.4, 0);
+    group.add(sub);
+  }
+  nodeGroups[id] = group;
+  return group;
+}
+
 // github service node: a simplified octocat-style silhouette (rounded head +
 // two pointed ears) built from primitives, so the github endpoint reads as
 // something more specific than the same low-poly sphere used for every other
@@ -895,9 +974,14 @@ graph.services.forEach((s, i) => {
 // core -> delegate-gemini (DELEGATION — solid amber connector, thicker than a
 // direct-call wire since it's a heavier relationship: a handoff, not a ping)
 graph.delegates.forEach(d => {
-  addDelegateNode(d.id, d.pos, d.label, d.tool);
+  if (d.shape === 'designer') {
+    addDesignerNode(d.id, d.pos, d.label, d.tool);
+  } else {
+    addDelegateNode(d.id, d.pos, d.label, d.tool);
+  }
   registerNodeEntrance(d.id, ENTRANCE_PHASE.delegate);
-  const c = addConnector(graph.core.pos, d.pos, 0.05, COLORS.amber, 0.85, 'core', d.id);
+  const connectorColor = d.shape === 'designer' ? COLORS.violet : COLORS.amber;
+  const c = addConnector(graph.core.pos, d.pos, 0.05, connectorColor, 0.85, 'core', d.id);
   registerWireEntrance(c, 0.85, ENTRANCE_PHASE.delegate + 130);
 });
 
@@ -916,6 +1000,18 @@ graph.repos.forEach((r, i) => {
 graph.services.forEach((s, i) => {
   const c = addConnector(delegateGemini.pos, s.pos, 0.025, COLORS.amber, 0.4, delegateGemini.id, s.id);
   registerWireEntrance(c, 0.4, ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER + 200);
+});
+
+// STEP 2 (gap-fill): delegate_designer -> its own phase nodes
+// (generate/validate/fix) -- a bounded internal loop, not an open fan-out
+// to arbitrary repos/services the way delegate_gemini gets above.
+const delegateDesigner = graph.delegates.find(d => d.id === 'delegate-designer');
+graph.designerPhases.forEach((p, i) => {
+  addNode(p.id, p.pos, 0.28, COLORS.violet, p.label);
+  const delay = ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER;
+  registerNodeEntrance(p.id, delay);
+  const c = addConnector(delegateDesigner.pos, p.pos, 0.028, COLORS.violet, 0.5, delegateDesigner.id, p.id);
+  registerWireEntrance(c, 0.5, delay + 130);
 });
 
 // ---- STEP 5: orbit rings (visual) ----
@@ -956,8 +1052,12 @@ function maybeAddOrbitRing(parentId, orbit, color, opacity) {
 }
 
 graph.services.forEach(s => maybeAddOrbitRing('core', s.orbit, COLORS.sage, 0.07));
-graph.delegates.forEach(d => maybeAddOrbitRing('core', d.orbit, COLORS.amber, 0.09));
+graph.delegates.forEach(d => {
+  const ringColor = d.shape === 'designer' ? COLORS.violet : COLORS.amber;
+  maybeAddOrbitRing('core', d.orbit, ringColor, 0.09);
+});
 graph.repos.forEach(r => maybeAddOrbitRing(r.parent, r.orbit, COLORS.amber, 0.06));
+graph.designerPhases.forEach(p => maybeAddOrbitRing(p.parent, p.orbit, COLORS.violet, 0.06));
 
 // tracks each ring's position onto its (possibly itself-orbiting) parent's
 // CURRENT world position every frame -- core never moves so those rings are
@@ -1238,6 +1338,18 @@ const sequence = [
     msg: 'core -&gt; <span class="fn">mem0</span>: direct call' },
   { pulses: [{ from: 'core', to: 'context7' }], kind: 'direct',
     msg: 'core -&gt; <span class="fn">context7</span>: direct call' },
+  { pulses: [{ from: 'core', to: 'delegate-designer' }], kind: 'delegate-bounded',
+    msg: 'core -&gt; <span class="fn">delegate_designer</span>: handoff (bounded loop)' },
+  { pulses: [{ from: 'delegate-designer', to: 'design-generate' }], kind: 'loop',
+    msg: '<span class="fn">delegate_designer</span> generates a first pass' },
+  { pulses: [{ from: 'design-generate', to: 'design-validate' }], kind: 'loop',
+    msg: 'generate -&gt; validate' },
+  { pulses: [{ from: 'design-validate', to: 'design-fix' }], kind: 'loop',
+    msg: 'validate finds issues -&gt; fix' },
+  { pulses: [{ from: 'design-fix', to: 'design-generate' }], kind: 'loop',
+    msg: 'fix -&gt; regenerate' },
+  { pulses: [{ from: 'delegate-designer', to: 'core' }], kind: 'return',
+    msg: '<span class="fn">delegate_designer</span> -&gt; core: validated result' },
   { pulses: [{ from: 'core', to: 'delegate-gemini' }], kind: 'delegate',
     msg: 'core -&gt; <span class="fn">delegate_gemini</span>: handoff (autonomous)' },
   { pulses: [
@@ -1267,7 +1379,7 @@ const sequence = [
   { pulses: [{ from: 'core', to: 'agent' }], kind: 'return',
     msg: 'core -&gt; agent: synthesized answer returned' },
 ];
-const KIND_COLOR = { direct: COLORS.sage, delegate: COLORS.amber, fanout: COLORS.amber, return: COLORS.text };
+const KIND_COLOR = { direct: COLORS.sage, delegate: COLORS.amber, 'delegate-bounded': COLORS.violet, loop: COLORS.violet, fanout: COLORS.amber, return: COLORS.text };
 
 // ---- ticker log: rolling last few lines, most recent highlighted ----
 const tickerEl = document.getElementById('ticker');
