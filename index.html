@@ -1101,6 +1101,12 @@ function addSecurityGate(pos, radius, label) {
 // entrance-choreography phase timing (ms from page load) -- nodes scale in
 // agent -> core -> services -> delegate -> repos, each phase overlapping
 // slightly into the next so it reads as one continuous beat, not four stops.
+// STEP 3 (delegate-reposition-plan) check: applyOrbitPositions() runs
+// unconditionally every frame from frame 0, so a delegate's group.position
+// already reflects the new y=7 orbit position while its scale is still
+// easing in below -- phase order/timing is position-independent, so
+// delegates now pop in near the core/agent gap instead of below core, with
+// no change needed here.
 const ENTRANCE_PHASE = { agent: 0, core: 220, services: 460, delegate: 760, repos: 1000 };
 const ENTRANCE_NODE_DURATION = 480;
 const ENTRANCE_WIRE_DURATION = 320;
@@ -1135,6 +1141,12 @@ registerWireEntrance(agentCoreWire, 0.6, ENTRANCE_PHASE.core + 150);
 // delegate ring (7.5) and STEP 1 outer service ring (10.5) -- so it still
 // reads as wrapping core specifically, not colliding with either ring. No
 // radius change needed.
+// STEP 3 (delegate-reposition-plan) check: gate radius (2.4) is far smaller
+// than DELEGATE_RING_RADIUS (7.5), so the delegate ring's xz-distance from
+// core keeps it clear of the gate at ANY yOffset -- moving the ring from -7
+// to +3 doesn't change this. Same reasoning covers the agent-core connector,
+// which runs straight up the x=0/z=0 axis: the ring's 7.5 radius keeps both
+// delegates permanently off that axis regardless of height. No collision.
 addSecurityGate(graph.core.pos, graph.core.r + 1.4, 'auth boundary \u2014 IP allowlist + shared key');
 registerNodeEntrance('security-gate', ENTRANCE_PHASE.core + 80);
 
@@ -1671,6 +1683,12 @@ const isNarrow = window.innerWidth < 640;
 // ~0.89 ratio (10.5/11.8) used for the fog density above, keeping the same
 // proportional framing/zoom feel rather than leaving extra unused headroom
 // now that the graph's outermost sweep is smaller and steadier.
+// STEP 3 (delegate-reposition-plan) check: the scene's outer vertical bound
+// is set by agent (y=9) and repos (y ~ -7 to -8, orbiting delegate_agent,
+// untouched by this plan), not by the delegate ring. The repositioned ring
+// (y=7) sits entirely inside that existing envelope, so it doesn't push the
+// bounding box out further -- these distances and the fog density above need
+// no changes.
 let theta = 0.35, phi = 1.15, radius = isNarrow ? 32 : 25; // spherical coords around origin
 const MIN_RADIUS = isNarrow ? 19 : 13, MAX_RADIUS = isNarrow ? 44 : 40;
 function updateCamera() {
