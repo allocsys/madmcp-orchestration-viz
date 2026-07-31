@@ -16,6 +16,7 @@
     --sage:#6FCF97;
     --violet:#C792EA;
     --sky:#5AC8E8;
+    --rose:#E8799E;
     --text:#E8EDF2;
     --muted:#7C8798;
   }
@@ -87,6 +88,7 @@
   #legend .dot.telemetry{background:var(--sky); box-shadow:0 0 4px var(--sky);}
   #legend .dot.delegate{background:var(--amber); box-shadow:0 0 6px var(--amber);}
   #legend .dot.loop{background:var(--violet); box-shadow:0 0 6px var(--violet);}
+  #legend .dot.sync{background:var(--rose); box-shadow:0 0 5px var(--rose);}
   #legend .caption{color:var(--muted); opacity:0.75; font-size:10px; margin-top:6px; max-width:220px;}
 
   @media (max-width: 640px){
@@ -112,7 +114,8 @@
   <div class="row"><span>telemetry (read-only)</span><span class="dot telemetry"></span></div>
   <div class="row"><span>delegation</span><span class="dot delegate"></span></div>
   <div class="row"><span>bounded loop</span><span class="dot loop"></span></div>
-  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result. a bounded loop (delegate_designer) cycles through a fixed generate &#8594; validate &#8594; fix sequence instead of fanning out. cloudflare is split into control-plane calls (manage workers/d1/r2/hyperdrive) and read-only telemetry querying, shown as a thinner, dimmer line. delegate_research is single-shot, not a loop: precision (sky) fetches one page and asks gemini a question; wide (sage) asks exa one search+synthesis question -- neither has github/notion/cloudflare access.</div>
+  <div class="row"><span>cross-service sync</span><span class="dot sync"></span></div>
+  <div class="caption">delegation hands off the whole task to an autonomous sub-agent, which fans out on its own and returns one result. a bounded loop (delegate_designer) cycles through a fixed generate &#8594; validate &#8594; fix sequence instead of fanning out. cloudflare is split into control-plane calls (manage workers/d1/r2/hyperdrive) and read-only telemetry querying, shown as a thinner, dimmer line. delegate_research is single-shot, not a loop: precision (sky) fetches one page and asks gemini a question; wide (sage) asks exa one search+synthesis question -- neither has github/notion/cloudflare access. the rose line direct from mem0 to notion is sync_mem0_to_notion -- a real cross-service orchestration edge, not two independent service calls.</div>
 </div>
 
 <div id="ticker" aria-live="polite">
@@ -149,6 +152,7 @@ const COLORS = {
   text: 0xE8EDF2,
   violet: 0xC792EA,
   sky: 0x5AC8E8,
+  rose: 0xE8799E,
 };
 
 // ---- renderer / scene / camera ----
@@ -1056,6 +1060,19 @@ graph.services.forEach((s, i) => {
   registerWireEntrance(w, isTelemetry ? 0.3 : 0.45, delay + 130);
 });
 
+// STEP 5 (gap-fill): sync_mem0_to_notion is a real cross-service orchestration
+// edge (Mem0 -> Notion), not just two independently-called services. A
+// dedicated connector directly between the mem0 and notion nodes (bypassing
+// core) represents this, rose-colored and distinct from either node's normal
+// core->service direct-call wire. Built after both nodes exist above, so
+// their static pos is available; updateConnectors() re-derives it from live
+// orbitWorldPositions every frame same as every other tracked connector, so
+// it keeps tracking both nodes as they orbit core independently of each other.
+const mem0SyncNode = graph.services.find(s => s.id === 'mem0');
+const notionSyncNode = graph.services.find(s => s.id === 'notion');
+const mem0NotionSyncWire = addConnector(mem0SyncNode.pos, notionSyncNode.pos, 0.03, COLORS.rose, 0.55, 'mem0', 'notion');
+registerWireEntrance(mem0NotionSyncWire, 0.55, ENTRANCE_PHASE.services + graph.services.length * ENTRANCE_STAGGER + 200);
+
 // core -> delegate-gemini (DELEGATION — solid amber connector, thicker than a
 // direct-call wire since it's a heavier relationship: a handoff, not a ping)
 graph.delegates.forEach(d => {
@@ -1443,6 +1460,8 @@ const sequence = [
     msg: 'core -&gt; <span class="fn">cf-observability</span>: telemetry query' },
   { pulses: [{ from: 'core', to: 'mem0' }], kind: 'direct',
     msg: 'core -&gt; <span class="fn">mem0</span>: direct call' },
+  { pulses: [{ from: 'mem0', to: 'notion' }], kind: 'sync',
+    msg: '<span class="fn">sync_mem0_to_notion</span>: mem0 -&gt; notion (cross-service sync)' },
   { pulses: [{ from: 'core', to: 'context7' }], kind: 'direct',
     msg: 'core -&gt; <span class="fn">context7</span>: direct call' },
   { pulses: [{ from: 'core', to: 'delegate-designer' }], kind: 'delegate-bounded',
@@ -1500,7 +1519,7 @@ const sequence = [
   { pulses: [{ from: 'core', to: 'agent' }], kind: 'return',
     msg: 'core -&gt; agent: synthesized answer returned' },
 ];
-const KIND_COLOR = { direct: COLORS.sage, telemetry: COLORS.sky, delegate: COLORS.amber, 'delegate-bounded': COLORS.violet, loop: COLORS.violet, fanout: COLORS.amber, return: COLORS.text, 'research-precision': COLORS.sky, 'research-wide': COLORS.sage };
+const KIND_COLOR = { direct: COLORS.sage, telemetry: COLORS.sky, delegate: COLORS.amber, 'delegate-bounded': COLORS.violet, loop: COLORS.violet, fanout: COLORS.amber, return: COLORS.text, 'research-precision': COLORS.sky, 'research-wide': COLORS.sage, sync: COLORS.rose };
 
 // ---- ticker log: rolling last few lines, most recent highlighted ----
 const tickerEl = document.getElementById('ticker');
