@@ -535,6 +535,13 @@ graph.repos.forEach((r, i) => {
 // out for a compact bounded loop. Scaled down post-hoc rather than moving the
 // static positions themselves, so phase/yOffset and the maybeAddOrbitRing
 // dedupe key are untouched.
+// STEP 2 (delegate-reposition-plan) check: this offset is derived once from
+// the two STATIC layout positions (orbitFromStaticPos), then re-applied atop
+// whatever the parent's LIVE position is every frame -- it was never coupled
+// to delegate_designer's old below-core spot, so it rode along automatically
+// when Step 1 moved the parent ring to yOffset +3. updateOrbits() also
+// resolves graph.delegates before this loop runs, so the parent position read
+// here is always this frame's, never a stale one -- no lag/detachment.
 const DESIGNER_PHASE_ORBIT_SCALE = 0.7;
 graph.designerPhases.forEach((p, i) => {
   const parentDelegate = graph.delegates.find(d => d.id === p.parent);
@@ -547,6 +554,10 @@ graph.designerPhases.forEach((p, i) => {
 // designerPhases orbiting delegate-designer.
 // pulled precision/wide in closer to delegate-research, same scale-after-
 // orbitFromStaticPos pattern used for the designer sub-orbs and repos above.
+// STEP 2 (delegate-reposition-plan) check: same reasoning as designerPhases
+// above -- offset derived from static positions, re-applied to delegate-
+// research's live (now repositioned) position every frame, resolved after
+// graph.delegates in updateOrbits(). No lag/detachment.
 const RESEARCH_MODE_ORBIT_SCALE = 0.5;
 graph.researchModes.forEach((m, i) => {
   const parentDelegate = graph.delegates.find(d => d.id === m.parent);
@@ -1258,6 +1269,11 @@ function maybeAddOrbitRing(parentId, orbit, color, opacity) {
 }
 
 graph.services.forEach(s => maybeAddOrbitRing('core', s.orbit, s.color || COLORS.sage, 0.07));
+// STEP 2 (delegate-reposition-plan) check: dedupe key is parentId+radius+
+// tilt+yOffset (no phase) -- delegate_designer and delegate_research still
+// share radius 7.5 / tilt 0 / yOffset 3 after Step 1's move, so they still
+// collapse onto one shared ring mesh, now centered at world y=7 instead of
+// the old y=-3.
 graph.delegates.forEach(d => {
   const ringColor = d.shape === 'designer' ? COLORS.violet : COLORS.amber;
   maybeAddOrbitRing('core', d.orbit, ringColor, 0.09);
