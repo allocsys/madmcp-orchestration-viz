@@ -1,8 +1,10 @@
 # Proposal: unify each delegate's sub-orbs onto a single shared orbit
 
-Status: **proposed, not yet implemented**. No code changes have been made for this
-yet -- this document captures the design so a future session can pick it up as a
-plan/PR.
+Status: **implemented**. Step 1 (designerPhases) and Step 2 (researchModes)
+are both in `index.html` -- see the `STEP 1 (sub-orb-ring-unification)` and
+`STEP 2 (sub-orb-ring-unification)` comment blocks there. This document is kept
+as the design record; see "Implementation notes" at the bottom for how the open
+questions below were resolved.
 
 ## Current state
 
@@ -50,16 +52,27 @@ one ring around `delegate_designer`, 2 researchModes on one ring around
 `delegate_research` -- visually matching how the top-tier service/delegate rings
 already read, instead of each sub-orb tracing its own separate faint path.
 
-## Open questions for implementation
+## Open questions for implementation (resolved)
 
-- Exact radius/yOffset per group -- needs visual tuning so the sub-orb ring reads
-  as clearly "orbiting the delegate" without overlapping the delegate's own node
-  glow or (for designerPhases, at delegate_designer's now-repositioned y=7 spot)
-  crowding the inner delegate ring's neighbor.
-- Whether `DESIGNER_PHASE_ORBIT_SCALE` / `RESEARCH_MODE_ORBIT_SCALE` are still the
-  right post-hoc scale factors once radius is a directly-chosen constant instead
-  of derived-then-scaled.
-- Confirm `updateOrbits()`'s existing resolution order (parent delegate resolved
-  before its sub-orbs each frame) still holds -- it should, since this change
-  only affects how each sub-orb's `orbit` object is constructed, not the
-  per-frame resolution order in `updateOrbits()`.
+- **Exact radius/yOffset per group** -- chosen close to each group's old
+  individually-derived range so the footprint didn't jump visually:
+  - designerPhases: `DESIGNER_PHASE_RING_RADIUS = 2.2`,
+    `DESIGNER_PHASE_RING_Y_OFFSET = -2.7` (old range was ~2.0-2.8 radius,
+    -2/-3 yOffset).
+  - researchModes: `RESEARCH_MODE_RING_RADIUS = 2.0`,
+    `RESEARCH_MODE_RING_Y_OFFSET = -3.5` (old range was ~1.8/2.24 radius,
+    -3/-4 yOffset).
+  Checked against both the delegate node's own glow sprite radius and the
+  inner `DELEGATE_RING_RADIUS` neighbor at delegate_designer/delegate_research's
+  repositioned y=7 spot -- the closest point on either sub-orb ring
+  (`sqrt(radius^2 + yOffset^2)` from the parent, since tilt=0 keeps y constant
+  around the ring) clears the parent's glow sprite footprint in both cases, so
+  no further tuning was needed.
+- **`DESIGNER_PHASE_ORBIT_SCALE` / `RESEARCH_MODE_ORBIT_SCALE`** -- moot: both
+  are gone. Once radius became a directly-chosen constant per group there was
+  nothing left to scale, so each `orbit` object is now built as a literal
+  `{radius, phase, yOffset, speed, tilt}` rather than derived-then-scaled.
+- **`updateOrbits()` resolution order** -- confirmed unchanged. Both groups are
+  still resolved in the same forEach blocks positioned after `graph.delegates`
+  in `updateOrbits()`, so each sub-orb reads its parent delegate's
+  already-current-frame position, same as before this change.
