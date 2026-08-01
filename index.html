@@ -1469,7 +1469,7 @@ function updatePulses(deltaMs) {
     // point the pulse head currently occupies, so the wire itself looks lit
     // up as traffic passes through it rather than just the traveling orb.
     // shimmerForward=false means this pulse runs opposite the connector's own
-    // a->b direction (e.g. a delegate-gemini->core return on a core->delegate
+    // a->b direction (e.g. a delegate-agent->core return on a core->delegate
     // connector), so the texture offset is mirrored to track correctly.
     if (p.shimmerMesh) {
       const v = p.shimmerForward ? eased : 1 - eased;
