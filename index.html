@@ -863,8 +863,8 @@ function updateConnectors() {
 
 // looked up by spawnPulse so a pulse traveling a registered edge can drive
 // that connector's shimmer overlay. Registered under both directions since
-// return traffic (e.g. delegate-gemini -> core) reuses the same physical
-// connector built as core -> delegate-gemini.
+// return traffic (e.g. delegate-agent -> core) reuses the same physical
+// connector built as core -> delegate-agent.
 const connectorRegistry = {};
 function registerConnectorEdge(aId, bId, mesh) {
   connectorRegistry[`${aId}|${bId}`] = { mesh, forward: true };
@@ -931,9 +931,9 @@ function addDelegateNode(id, pos, label, sublabel) {
 }
 
 // STEP 2 (gap-fill): delegate_designer's node -- a dodecahedron core (not
-// delegate_gemini's octahedron) with a SINGLE ring (not delegate_gemini's
+// delegate_agent's octahedron) with a SINGLE ring (not delegate_agent's
 // two intersecting rings), in a distinct violet accent. Signals "bounded,
-// single-track loop" vs. delegate_gemini's "open, multi-target fan-out" at
+// single-track loop" vs. delegate_agent's "open, multi-target fan-out" at
 // a glance, without needing the legend to carry the whole distinction.
 function addDesignerNode(id, pos, label, sublabel) {
   const group = new THREE.Group();
