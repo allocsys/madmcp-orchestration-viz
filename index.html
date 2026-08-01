@@ -139,7 +139,7 @@
    madmcp orchestration viz — STEP 3: orchestration animation
    Node graph: Agent -> madmcp core -> service spokes -> repo leaves
    A scripted pulse sequence now travels the graph: direct calls
-   (core -> service) and delegation (core -> delegate_gemini ->
+   (core -> service) and delegation (core -> delegate_agent ->
    repos/services), with node flashes and a live ticker log.
    Camera retains manual drag-orbit plus slow idle spin.
 --------------------------------------------------------- */
@@ -375,7 +375,7 @@ const graph = {
   // Centered on the x=0 axis, directly below core -- not off to one side --
   // so it reads as core's own delegate, not an unrelated satellite.
   delegates: [
-    { id:'delegate-gemini', pos:[0, -2, 0], parent:'core', label:'delegate_agent', tool:'autonomous multi-repo investigation' },
+    { id:'delegate-agent', pos:[0, -2, 0], parent:'core', label:'delegate_agent', tool:'autonomous multi-repo investigation' },
     { id:'delegate-designer', pos:[-7, -3, 3], parent:'core', label:'delegate_designer', tool:'bounded loop: generate -> validate -> fix', shape:'designer' },
     { id:'delegate-research', pos:[7, -3, -3], parent:'core', label:'delegate_research', tool:'web-only: precision (gemini) or wide (exa)', shape:'research' },
   ],
@@ -389,9 +389,9 @@ const graph = {
     { id:'research-wide',      pos:[ 5, -7, -7], parent:'delegate-research', label:'wide',      tool:'task -> exa /answer' },
   ],
   repos: [
-    { id:'api-service',    pos:[-4, -7, 4], parent:'delegate-gemini', label:'api-service' },
-    { id:'worker-queue',   pos:[ 4, -7, 4], parent:'delegate-gemini', label:'worker-queue' },
-    { id:'shared-types',   pos:[ 0, -8, -5], parent:'delegate-gemini', label:'shared-types' },
+    { id:'api-service',    pos:[-4, -7, 4], parent:'delegate-agent', label:'api-service' },
+    { id:'worker-queue',   pos:[ 4, -7, 4], parent:'delegate-agent', label:'worker-queue' },
+    { id:'shared-types',   pos:[ 0, -8, -5], parent:'delegate-agent', label:'shared-types' },
   ],
   // STEP 2 (gap-fill): delegate_designer's own bounded loop -- three phase
   // nodes it cycles through (generate -> validate -> fix -> regenerate),
@@ -404,7 +404,7 @@ const graph = {
 };
 
 // ---- STEP 1: dynamic orbital position system ----
-// Every non-anchor node (services, delegate-gemini, repos) now also carries an
+// Every non-anchor node (services, delegate-agent, repos) now also carries an
 // orbit descriptor alongside its static `pos`: { parent, radius, speed, phase,
 // tilt, yOffset }. `pos` is left completely alone for this step -- every node
 // mesh, connector, and pulse still reads the same fixed coordinates it always
@@ -414,7 +414,7 @@ const graph = {
 //
 //   parent  - id of the node this orbits. Resolved through orbitWorldPositions
 //             each frame, so a node can orbit another *moving* node (repos
-//             orbit delegate-gemini, which itself orbits core) without any
+//             orbit delegate-agent, which itself orbits core) without any
 //             special-casing -- see the dependency order in updateOrbits().
 //   radius  - orbit radius in the parent's local xz-plane, before tilt.
 //   speed   - angular velocity in radians/ms (sign sets direction).
@@ -492,7 +492,7 @@ graph.services.forEach((s, i) => {
 const DELEGATE_RING_RADIUS = 7.5; // unchanged -- still well clear of the agent-core connector at any yOffset, see note above
 const DELEGATE_RING_SPEED = -0.000015; // negated to reverse orbit direction (counter-clockwise) -- same pace as before, magnitude unchanged, distinct from delegate_agent's near-static speed below
 const DELEGATE_RING_Y_OFFSET = 3; // moved from -7 (below core) to +3, placing the ring at world y=7 -- between core's y(4) and agent's y(9)
-const boundedDelegates = graph.delegates.filter(d => d.id !== 'delegate-gemini');
+const boundedDelegates = graph.delegates.filter(d => d.id !== 'delegate-agent');
 boundedDelegates.forEach((d, i) => {
   d.orbit = {
     radius: DELEGATE_RING_RADIUS,
@@ -502,16 +502,16 @@ boundedDelegates.forEach((d, i) => {
     tilt: 0,
   };
 });
-// delegate_agent (delegate-gemini): left exactly as-is -- fixed satellite
-// directly under core. radius works out to 0 (delegate-gemini sits directly
+// delegate_agent (delegate-agent): left exactly as-is -- fixed satellite
+// directly under core. radius works out to 0 (delegate-agent sits directly
 // below core in the static layout, dx=dz=0) so this speed has no visible
 // effect today -- left slowed in step with the rest in case that ever changes.
-const delegateGeminiNode = graph.delegates.find(d => d.id === 'delegate-gemini');
-delegateGeminiNode.orbit = orbitFromStaticPos(delegateGeminiNode.pos, graph.core.pos, 0.00001);
+const delegateAgentNode = graph.delegates.find(d => d.id === 'delegate-agent');
+delegateAgentNode.orbit = orbitFromStaticPos(delegateAgentNode.pos, graph.core.pos, 0.00001);
 // STEP 3 (sub-orb-ring-unification): api-service/worker-queue/shared-types
 // now share one fixed radius/yOffset/speed, evenly spaced 120 deg apart,
 // instead of each deriving its own radius/yOffset from its static pos
-// relative to delegate-gemini (previously via orbitFromStaticPos, a +-0.4
+// relative to delegate-agent (previously via orbitFromStaticPos, a +-0.4
 // collision offset between api-service/worker-queue, then REPO_ORBIT_SCALE).
 // Radius/yOffset are the average of the old individually-derived values
 // (radius ~2.63-3.03, yOffset -5/-5/-6), so the ring's height and reach read
@@ -628,9 +628,9 @@ function computeOrbitPosition(orbit, parentPos, elapsedMs) {
 }
 
 // recomputes every orbiting node's world position for the given frame time.
-// Order matters: core-orbiting nodes (services, delegate-gemini) can resolve
-// in any order since core is a fixed anchor, but repos orbit delegate-gemini
-// itself, so that loop must run after delegate-gemini's own position has been
+// Order matters: core-orbiting nodes (services, delegate-agent) can resolve
+// in any order since core is a fixed anchor, but repos orbit delegate-agent
+// itself, so that loop must run after delegate-agent's own position has been
 // refreshed this frame -- otherwise repos would trail one frame behind.
 function updateOrbits(nowMs) {
   const elapsedMs = nowMs - entranceStart;
@@ -1226,7 +1226,7 @@ const notionSyncNode = graph.services.find(s => s.id === 'notion');
 // 'sync_mem0_to_notion' pulse still travels this edge fine via each node's
 // live orbitWorldPositions entry.
 
-// core -> delegate-gemini (DELEGATION — solid amber connector, thicker than a
+// core -> delegate-agent (DELEGATION — solid amber connector, thicker than a
 // direct-call wire since it's a heavier relationship: a handoff, not a ping)
 graph.delegates.forEach(d => {
   if (d.shape === 'designer') {
@@ -1241,8 +1241,8 @@ graph.delegates.forEach(d => {
   // still travel these edges fine via orbitWorldPositions.
 });
 
-// delegate-gemini -> repo leaves (the sub-agent's OWN fan-out, not core's)
-const delegateGemini = graph.delegates[0];
+// delegate-agent -> repo leaves (the sub-agent's OWN fan-out, not core's)
+const delegateAgent = graph.delegates[0];
 graph.repos.forEach((r, i) => {
   addNode(r.id, r.pos, 0.32, 0x8CA3BD, r.label);
   const delay = ENTRANCE_PHASE.repos + i * ENTRANCE_STAGGER;
@@ -1251,7 +1251,7 @@ graph.repos.forEach((r, i) => {
   // return pulses still travel these edges fine via orbitWorldPositions.
 });
 
-// delegate-gemini -> services: connector removed per request -- delegate_agent
+// delegate-agent -> services: connector removed per request -- delegate_agent
 // isn't limited to repos, it can read across any connected module too, and
 // the fanout/return pulses to/from those services still travel fine via
 // orbitWorldPositions with no static wire behind them.
@@ -1647,35 +1647,33 @@ const sequence = [
     msg: 'wide -&gt; <span class="fn">delegate_research</span>: answer + sources' },
   { pulses: [{ from: 'delegate-research', to: 'core' }], kind: 'return',
     msg: '<span class="fn">delegate_research</span> -&gt; core: research result' },
-  { pulses: [{ from: 'core', to: 'delegate-gemini' }], kind: 'delegate',
+  { pulses: [{ from: 'core', to: 'delegate-agent' }], kind: 'delegate',
     msg: 'core -&gt; <span class="fn">delegate_agent</span>: handoff (autonomous)' },
   { pulses: [
-      { from: 'delegate-gemini', to: 'api-service' },
-      { from: 'delegate-gemini', to: 'worker-queue' },
-      { from: 'delegate-gemini', to: 'shared-types' },
-      { from: 'delegate-gemini', to: 'github' },
-      { from: 'delegate-gemini', to: 'notion' },
-      { from: 'delegate-gemini', to: 'cloudflare' },
-      { from: 'delegate-gemini', to: 'cloudflare-observability' },
-      { from: 'delegate-gemini', to: 'mem0' },
-      { from: 'delegate-gemini', to: 'context7' },
-      { from: 'delegate-gemini', to: 'fetch' },
+      { from: 'delegate-agent', to: 'api-service' },
+      { from: 'delegate-agent', to: 'worker-queue' },
+      { from: 'delegate-agent', to: 'shared-types' },
+      { from: 'delegate-agent', to: 'github' },
+      { from: 'delegate-agent', to: 'notion' },
+      { from: 'delegate-agent', to: 'cloudflare' },
+      { from: 'delegate-agent', to: 'cloudflare-observability' },
+      { from: 'delegate-agent', to: 'mem0' },
+      { from: 'delegate-agent', to: 'context7' },
     ], kind: 'fanout',
-    msg: '<span class="fn">delegate_agent</span> fans out to 10 targets in parallel' },
+    msg: '<span class="fn">delegate_agent</span> fans out to 9 targets in parallel' },
   { pulses: [
-      { from: 'api-service', to: 'delegate-gemini' },
-      { from: 'worker-queue', to: 'delegate-gemini' },
-      { from: 'shared-types', to: 'delegate-gemini' },
-      { from: 'github', to: 'delegate-gemini' },
-      { from: 'notion', to: 'delegate-gemini' },
-      { from: 'cloudflare', to: 'delegate-gemini' },
-      { from: 'cloudflare-observability', to: 'delegate-gemini' },
-      { from: 'mem0', to: 'delegate-gemini' },
-      { from: 'context7', to: 'delegate-gemini' },
-      { from: 'fetch', to: 'delegate-gemini' },
+      { from: 'api-service', to: 'delegate-agent' },
+      { from: 'worker-queue', to: 'delegate-agent' },
+      { from: 'shared-types', to: 'delegate-agent' },
+      { from: 'github', to: 'delegate-agent' },
+      { from: 'notion', to: 'delegate-agent' },
+      { from: 'cloudflare', to: 'delegate-agent' },
+      { from: 'cloudflare-observability', to: 'delegate-agent' },
+      { from: 'mem0', to: 'delegate-agent' },
+      { from: 'context7', to: 'delegate-agent' },
     ], kind: 'return',
-    msg: '10 targets -&gt; <span class="fn">delegate_agent</span>: results returned' },
-  { pulses: [{ from: 'delegate-gemini', to: 'core' }], kind: 'return',
+    msg: '9 targets -&gt; <span class="fn">delegate_agent</span>: results returned' },
+  { pulses: [{ from: 'delegate-agent', to: 'core' }], kind: 'return',
     msg: '<span class="fn">delegate_agent</span> -&gt; core: consolidated result' },
   { pulses: [{ from: 'core', to: 'agent' }], kind: 'return',
     msg: 'core -&gt; agent: synthesized answer returned' },
