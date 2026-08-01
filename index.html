@@ -395,7 +395,7 @@ const graph = {
   ],
   // STEP 2 (gap-fill): delegate_designer's own bounded loop -- three phase
   // nodes it cycles through (generate -> validate -> fix -> regenerate),
-  // never fanning out to arbitrary repos the way delegate_gemini does.
+  // never fanning out to arbitrary repos the way delegate_agent does.
   designerPhases: [
     { id:'design-generate', pos:[-9, -5,  1], parent:'delegate-designer', label:'generate' },
     { id:'design-validate', pos:[-5, -6,  5], parent:'delegate-designer', label:'validate' },
@@ -521,7 +521,7 @@ delegateAgentNode.orbit = orbitFromStaticPos(delegateAgentNode.pos, graph.core.p
 // stays constant over time -- same reasoning as designerPhases/researchModes
 // above. This lets maybeAddOrbitRing's dedupe key (parentId+radius+tilt+
 // yOffset) collapse all 3 repos onto one shared ring mesh around
-// delegate-gemini, same as the other two sub-orb groups already do around
+// delegate-agent, same as the other two sub-orb groups already do around
 // their own delegates.
 const REPO_RING_RADIUS = 2.8;
 const REPO_RING_Y_OFFSET = -5.3;
@@ -1258,7 +1258,7 @@ graph.repos.forEach((r, i) => {
 
 // STEP 2 (gap-fill): delegate_designer -> its own phase nodes
 // (generate/validate/fix) -- a bounded internal loop, not an open fan-out
-// to arbitrary repos/services the way delegate_gemini gets above.
+// to arbitrary repos/services the way delegate_agent gets above.
 const delegateDesigner = graph.delegates.find(d => d.id === 'delegate-designer');
 graph.designerPhases.forEach((p, i) => {
   addNode(p.id, p.pos, 0.28, COLORS.violet, p.label);
@@ -1293,7 +1293,7 @@ graph.researchModes.forEach((m, i) => {
 // than nodes just drifting around at random. Reuses the rotatingShells idea
 // (a thin wireframe-ish ring) but these don't spin themselves -- the orbiting
 // node sweeping around the ring IS the motion, so the ring itself stays put
-// (with core) or just tracks its parent's position (with delegate-gemini),
+// (with core) or just tracks its parent's position (with delegate-agent),
 // never its own extra rotation.
 const orbitRings = []; // { mesh, parentId, yOffset } -- position re-tracked live each frame
 
@@ -1340,7 +1340,7 @@ graph.researchModes.forEach(m => maybeAddOrbitRing(m.parent, m.orbit, m.id === '
 
 // tracks each ring's position onto its (possibly itself-orbiting) parent's
 // CURRENT world position every frame -- core never moves so those rings are
-// effectively static, but delegate-gemini orbits core, so repo/service rings
+// effectively static, but delegate-agent orbits core, so repo/service rings
 // centered on it have to be re-centered each frame too, same as the nodes
 // themselves in applyOrbitPositions().
 function applyOrbitRingPositions() {
@@ -1600,7 +1600,7 @@ function updateEntrance(nowMs) {
 
 // the scripted orchestration: agent dispatches -> core fans out direct calls
 // to every service, one at a time -> core hands the whole task off to
-// delegate_gemini, which fans out to ALL its targets AT ONCE (that's the point
+// delegate_agent, which fans out to ALL its targets AT ONCE (that's the point
 // of delegation: one handoff, many simultaneous sub-investigations) -> the
 // consolidated result travels back through core to the agent as two visible hops.
 // Each step's `pulses` array fires together in the same tick; `msg` describes the step.
